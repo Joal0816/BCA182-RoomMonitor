@@ -2,8 +2,8 @@
 #define MOTION_TASK_H
 
 #include "main.h"
-#include "../hal/pir.h"
-#include "../drivers/uart_mutex.h"
+#include "hal/pir.h"
+#include "drivers/uart_mutex.h"
 
 typedef struct {
     PIR_t *pir;

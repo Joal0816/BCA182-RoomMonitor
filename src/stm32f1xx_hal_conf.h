@@ -54,11 +54,11 @@ extern "C" {
 /* ########################### System Configuration ######################## */
 #define VDD_VALUE                    3300U
 #define TICK_INT_PRIORITY            0U
-#define USE_RTOS                     1U
+#define USE_RTOS                     0U
 #define PREFETCH_ENABLE              1U
 
 /* ########################## Assert Selection ############################## */
-/* #define USE_FULL_ASSERT    1U */
+#define USE_FULL_ASSERT    1U
 
 /* Includes ------------------------------------------------------------------*/
 #ifdef HAL_RCC_MODULE_ENABLED
@@ -93,6 +93,13 @@ extern "C" {
 #endif
 #ifdef HAL_UART_MODULE_ENABLED
   #include "stm32f1xx_hal_uart.h"
+#endif
+
+#ifdef USE_FULL_ASSERT
+  #define assert_param(expr) ((expr) ? (void)0U : assert_failed((uint8_t *)__FILE__, __LINE__))
+  void assert_failed(uint8_t* file, uint32_t line);
+#else
+  #define assert_param(expr) ((void)0U)
 #endif
 
 #ifdef __cplusplus

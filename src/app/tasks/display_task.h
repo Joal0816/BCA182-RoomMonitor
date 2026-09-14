@@ -2,8 +2,10 @@
 #define DISPLAY_TASK_H
 
 #include "main.h"
-#include "../hal/oled.h"
-#include "../drivers/uart_mutex.h"
+#include "hal/oled.h"
+#include "logic/state_machine.h"
+#include "logic/temperature.h"
+#include "drivers/uart_mutex.h"
 
 typedef struct {
     OLED_t *oled;

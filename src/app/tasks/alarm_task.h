@@ -2,9 +2,9 @@
 #define ALARM_TASK_H
 
 #include "main.h"
-#include "../logic/alarm.h"
-#include "../logic/temperature.h"
-#include "../drivers/uart_mutex.h"
+#include "logic/alarm.h"
+#include "logic/temperature.h"
+#include "drivers/uart_mutex.h"
 
 typedef struct {
     QueueHandle_t sensor_queue;

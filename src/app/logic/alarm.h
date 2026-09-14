@@ -2,7 +2,8 @@
 #define ALARM_H
 
 #include "main.h"
-#include "../hal/buzzer.h"
+#include "hal/buzzer.h"
+#include "logic/temperature.h"
 
 typedef struct {
     Buzzer_t *buzzer;

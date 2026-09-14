@@ -21,9 +21,10 @@
 #include "app/tasks/sensor_task.h"
 #include "app/tasks/alarm_task.h"
 #include "app/tasks/display_task.h"
-#include "app/tasks/display_task.h"
 
 #include "drivers/uart_mutex.h"
+
+extern void xPortSysTickHandler(void);
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -242,11 +243,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     if (GPIO_Pin == GPIO_PIN_0) {
-        PIR_EXTI_CALLBACK(&pir);
+        PIR_EXTI_Callback(&pir);
         vTaskNotifyGiveFromISR(motion_task_params.task_handle, &xHigherPriorityTaskWoken);
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_2) {
-        Encoder_CLK_EXTI_CALLBACK(&encoder);
+        Encoder_CLK_EXTI_Callback(&encoder);
         vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_4) {
@@ -292,3 +293,10 @@ void Error_Handler(void) {
     while (1) {
     }
 }
+
+#ifdef USE_FULL_ASSERT
+void assert_failed(uint8_t *file, uint32_t line) {
+    UART_Mutex_Printf(&uart_mutex, "ASSERT: %s:%lu\r\n", file, line);
+    Error_Handler();
+}
+#endif

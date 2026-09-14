@@ -2,10 +2,10 @@
 #define SENSOR_TASK_H
 
 #include "main.h"
-#include "../hal/dht22.h"
-#include "../hal/ldr.h"
-#include "../hal/pir.h"
-#include "../drivers/uart_mutex.h"
+#include "hal/dht22.h"
+#include "hal/ldr.h"
+#include "hal/pir.h"
+#include "drivers/uart_mutex.h"
 
 typedef struct {
     DHT22_t *dht22;

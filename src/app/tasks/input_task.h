@@ -2,8 +2,8 @@
 #define INPUT_TASK_H
 
 #include "main.h"
-#include "../hal/encoder.h"
-#include "../drivers/uart_mutex.h"
+#include "hal/encoder.h"
+#include "drivers/uart_mutex.h"
 
 typedef struct {
     Encoder_t *encoder;

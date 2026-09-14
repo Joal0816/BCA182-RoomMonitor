@@ -1,4 +1,6 @@
 #include "dht22.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 static void DHT22_SetOutput(DHT22_t *dht) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -40,7 +42,6 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
 uint8_t DHT22_Read(DHT22_t *dht) {
     uint8_t data[5] = {0};
     uint8_t timeout;
-    uint32_t start_tick;
 
     taskENTER_CRITICAL();
 
