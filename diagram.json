@@ -2,6 +2,9 @@
   "version": 1,
   "author": "BCA182 Student",
   "editor": "wokwi",
+  "serialMonitor": {
+    "display": "always"
+  },
   "parts": [
     {
       "type": "board-stm32-bluepill",
@@ -82,6 +85,8 @@
     ["mcu:3.3V", "encoder:VCC", "red", ["h0"]],
     ["mcu:GND.1", "encoder:GND", "black", ["h0"]],
     ["mcu:PB8", "buzzer:2", "red", ["h0"]],
-    ["mcu:GND.1", "buzzer:1", "black", ["h0"]]
+    ["mcu:GND.1", "buzzer:1", "black", ["h0"]],
+    ["mcu:PA9", "$serialMonitor:RX", "red", ["h0"]],
+    ["mcu:PA10", "$serialMonitor:TX", "blue", ["h0"]]
   ]
 }
