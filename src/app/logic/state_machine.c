@@ -2,7 +2,7 @@
 
 void StateMachine_Init(StateMachine_t *sm, uint32_t timeout_ms) {
     sm->current_state = STATE_ACTIVE;
-    sm->last_motion_tick = 0;
+    sm->last_motion_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
     sm->timeout_ms = timeout_ms;
 }
 

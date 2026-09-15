@@ -1,4 +1,6 @@
 #include "encoder.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 void Encoder_Init(Encoder_t *enc,
                   GPIO_TypeDef *clk_port, uint16_t clk_pin,
@@ -41,8 +43,10 @@ void Encoder_Init(Encoder_t *enc,
 }
 
 int8_t Encoder_GetDelta(Encoder_t *enc) {
+    taskENTER_CRITICAL();
     int8_t delta = enc->position;
     enc->position = 0;
+    taskEXIT_CRITICAL();
     return delta;
 }
 

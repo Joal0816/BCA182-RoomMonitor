@@ -102,6 +102,7 @@ int main(void) {
 
     alarm_task_params.sensor_queue = sensor_queue;
     alarm_task_params.alarm = &alarm;
+    alarm_task_params.state_machine = &state_machine;
     alarm_task_params.uart_mutex = &uart_mutex;
 
     display_task_params.oled = &oled;
@@ -278,13 +279,20 @@ void SysTick_Handler(void) {
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     (void)xTask;
-    (void)pcTaskName;
+    UART_Mutex_Printf(&uart_mutex, "[FATAL] Stack overflow in task: %s\r\n", pcTaskName);
+    __disable_irq();
     while (1) {
+        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+        for (volatile uint32_t i = 0; i < 1000000; i++);
     }
 }
 
 void vApplicationMallocFailedHook(void) {
+    UART_Mutex_Printf(&uart_mutex, "[FATAL] Malloc failed - heap exhausted\r\n");
+    __disable_irq();
     while (1) {
+        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+        for (volatile uint32_t i = 0; i < 500000; i++);
     }
 }
 

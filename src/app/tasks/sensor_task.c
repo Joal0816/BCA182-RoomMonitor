@@ -1,4 +1,5 @@
 #include "sensor_task.h"
+#include <math.h>
 
 void SensorTask(void *pvParameters) {
     SensorTaskParams_t *params = (SensorTaskParams_t *)pvParameters;
@@ -8,13 +9,15 @@ void SensorTask(void *pvParameters) {
     for (;;) {
         SensorData_t data;
         data.timestamp = xTaskGetTickCount();
+        uint8_t read_ok = 1;
 
         if (DHT22_Read(params->dht22) == DHT22_OK) {
             data.temperature = DHT22_GetTemperature(params->dht22);
             data.humidity = DHT22_GetHumidity(params->dht22);
         } else {
-            data.temperature = 0.0f;
-            data.humidity = 0.0f;
+            data.temperature = NAN;
+            data.humidity = NAN;
+            read_ok = 0;
             UART_Mutex_Printf(params->uart_mutex, "[SENSOR] DHT22 read error\r\n");
         }
 
@@ -27,7 +30,9 @@ void SensorTask(void *pvParameters) {
 
         data.motion_detected = PIR_GetState(params->pir);
 
-        xQueueSend(params->sensor_queue, &data, 0);
+        if (read_ok) {
+            xQueueSend(params->sensor_queue, &data, 0);
+        }
 
         UART_Mutex_Printf(params->uart_mutex,
                          "[SENSOR] T=%.1fC H=%.1f%% L=%d M=%d\r\n",

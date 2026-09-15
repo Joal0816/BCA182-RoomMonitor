@@ -6,8 +6,9 @@ static void Buzzer_SetFrequency(Buzzer_t *buzzer, uint16_t frequency) {
         return;
     }
 
-    uint32_t timer_clock = HAL_RCC_GetPCLK1Freq();
-    if (HAL_RCC_GetPCLK1Freq() != HAL_RCC_GetHCLKFreq()) {
+    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+    uint32_t timer_clock = pclk1;
+    if (pclk1 != HAL_RCC_GetHCLKFreq()) {
         timer_clock *= 2;
     }
 

@@ -100,23 +100,27 @@ void OLED_DrawString(OLED_t *oled, uint8_t x, uint8_t y, const char *str, uint8_
 }
 
 void OLED_DrawLine(OLED_t *oled, uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t color) {
-    int dx = (x1 > x0) ? (x1 - x0) : (x0 - x1);
-    int dy = (y1 > y0) ? (y1 - y0) : (y0 - y1);
-    int sx = (x0 < x1) ? 1 : -1;
-    int sy = (y0 < y1) ? 1 : -1;
-    int err = dx - dy;
+    int16_t dx = (x1 > x0) ? (x1 - x0) : (x0 - x1);
+    int16_t dy = (y1 > y0) ? (y1 - y0) : (y0 - y1);
+    int16_t sx = (x0 < x1) ? 1 : -1;
+    int16_t sy = (y0 < y1) ? 1 : -1;
+    int16_t err = dx - dy;
+    int16_t cx = x0;
+    int16_t cy = y0;
 
     while (1) {
-        OLED_SetPixel(oled, x0, y0, color);
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
+        if (cx >= 0 && cx < OLED_WIDTH && cy >= 0 && cy < OLED_HEIGHT) {
+            OLED_SetPixel(oled, (uint8_t)cx, (uint8_t)cy, color);
+        }
+        if (cx == x1 && cy == y1) break;
+        int16_t e2 = 2 * err;
         if (e2 > -dy) {
             err -= dy;
-            x0 += sx;
+            cx += sx;
         }
         if (e2 < dx) {
             err += dx;
-            y0 += sy;
+            cy += sy;
         }
     }
 }
@@ -129,9 +133,9 @@ void OLED_DrawRect(OLED_t *oled, uint8_t x, uint8_t y, uint8_t w, uint8_t h, uin
 }
 
 void OLED_FillRect(OLED_t *oled, uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
-    for (uint8_t i = x; i < x + w; i++) {
-        for (uint8_t j = y; j < y + h; j++) {
-            OLED_SetPixel(oled, i, j, color);
+    for (uint16_t i = x; i < (uint16_t)x + w && i < OLED_WIDTH; i++) {
+        for (uint16_t j = y; j < (uint16_t)y + h && j < OLED_HEIGHT; j++) {
+            OLED_SetPixel(oled, (uint8_t)i, (uint8_t)j, color);
         }
     }
 }

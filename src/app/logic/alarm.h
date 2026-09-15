@@ -8,7 +8,7 @@
 typedef struct {
     Buzzer_t *buzzer;
     uint8_t enabled;
-    uint16_t frequency;
+    uint16_t current_freq;
     uint32_t last_toggle_tick;
     uint32_t toggle_interval_ms;
     uint8_t alarm_active;

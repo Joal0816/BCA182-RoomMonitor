@@ -24,6 +24,14 @@ static void DHT22_Delay_us(uint32_t us) {
     while ((DWT->CYCCNT - start) < ticks);
 }
 
+static uint8_t DHT22_ComputeChecksum(uint8_t *data) {
+    uint8_t crc = 0;
+    for (int i = 0; i < 4; i++) {
+        crc += data[i];
+    }
+    return crc;
+}
+
 void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
     dht->port = port;
     dht->pin = pin;
@@ -36,7 +44,7 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
 
     DHT22_SetOutput(dht);
     HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_SET);
-    HAL_Delay(2000);
+    DHT22_Delay_us(2000000);
 }
 
 uint8_t DHT22_Read(DHT22_t *dht) {
@@ -47,7 +55,7 @@ uint8_t DHT22_Read(DHT22_t *dht) {
 
     DHT22_SetOutput(dht);
     HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_RESET);
-    HAL_Delay(18);
+    DHT22_Delay_us(18000);
     HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_SET);
     DHT22_Delay_us(40);
 
@@ -106,7 +114,7 @@ uint8_t DHT22_Read(DHT22_t *dht) {
 
     taskEXIT_CRITICAL();
 
-    uint8_t crc = DHT22_ComputeCRC(data);
+    uint8_t crc = DHT22_ComputeChecksum(data);
     if (crc != data[4]) {
         return DHT22_ERROR;
     }
@@ -124,18 +132,10 @@ uint8_t DHT22_Read(DHT22_t *dht) {
     return DHT22_OK;
 }
 
-float DHT22_GetTemperature(DHT22_t *dht) {
+float DHT22_GetTemperature(const DHT22_t *dht) {
     return dht->temperature;
 }
 
-float DHT22_GetHumidity(DHT22_t *dht) {
+float DHT22_GetHumidity(const DHT22_t *dht) {
     return dht->humidity;
-}
-
-uint8_t DHT22_ComputeCRC(uint8_t *data) {
-    uint8_t crc = 0;
-    for (int i = 0; i < 4; i++) {
-        crc += data[i];
-    }
-    return crc;
 }

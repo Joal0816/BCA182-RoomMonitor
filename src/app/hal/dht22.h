@@ -17,8 +17,7 @@ typedef struct {
 
 void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin);
 uint8_t DHT22_Read(DHT22_t *dht);
-float DHT22_GetTemperature(DHT22_t *dht);
-float DHT22_GetHumidity(DHT22_t *dht);
-uint8_t DHT22_ComputeCRC(uint8_t *data);
+float DHT22_GetTemperature(const DHT22_t *dht);
+float DHT22_GetHumidity(const DHT22_t *dht);
 
 #endif /* DHT22_H */
