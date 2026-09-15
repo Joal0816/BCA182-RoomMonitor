@@ -19,9 +19,19 @@ static void DHT22_SetInput(DHT22_t *dht) {
 }
 
 static void DHT22_Delay_us(uint32_t us) {
-    uint32_t start = DWT->CYCCNT;
-    uint32_t ticks = us * (SystemCoreClock / 1000000U);
-    while ((DWT->CYCCNT - start) < ticks);
+    /* Use DWT cycle counter if available, otherwise fall back to volatile loop */
+    if (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) {
+        uint32_t start = DWT->CYCCNT;
+        uint32_t ticks = us * (SystemCoreClock / 1000000U);
+        uint32_t timeout = ticks + 100000;
+        while ((DWT->CYCCNT - start) < ticks) {
+            if (--timeout == 0) break;
+        }
+    } else {
+        /* Fallback: approximate delay using volatile loop */
+        volatile uint32_t count = us * (SystemCoreClock / 1000000U / 4);
+        while (count--) { __asm__ volatile("nop"); }
+    }
 }
 
 static uint8_t DHT22_ComputeChecksum(uint8_t *data) {

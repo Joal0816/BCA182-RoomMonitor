@@ -241,6 +241,8 @@ Detailed findings are in `docs/static-analysis.md`.
 
 4. **Fixed priority scheme:** Task priorities are statically configured at compile time. Dynamic priority adjustment (e.g., priority inheritance for sensor tasks during alarm) was not implemented due to complexity.
 
+5. **Wokwi simulation limitation:** The Wokwi VSCode extension does not fully support STM32Cube HAL initialization sequences. While the STM32 Blue Pill simulation supports GPIO, USART, I2C, SPI, ADC, and timers, the HAL peripheral initialization (HAL_Init, SystemClock_Config, MX_GPIO_Init, etc.) does not execute correctly in the simulated environment. The firmware compiles successfully (`pio run` succeeds) and passes all unit tests (`pio test` succeeds), but the Wokwi simulation does not produce serial output or OLED display updates. This is a known limitation of the Wokwi simulator when using STM32Cube HAL framework. All Wokwi STM32 examples use Arduino framework, which has different initialization requirements. For hardware validation, an actual STM32 Blue Pill board with ST-Link programmer is required.
+
 ### 7.3 Resource Utilization
 
 | Resource | Used | Available | Utilization |
