@@ -8,7 +8,6 @@
 typedef struct {
     PIR_t *pir;
     EventGroupHandle_t event_group;
-    QueueHandle_t sensor_queue;
     UART_Mutex_t *uart_mutex;
     TaskHandle_t task_handle;
 } MotionTaskParams_t;

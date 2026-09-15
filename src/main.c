@@ -91,7 +91,6 @@ int main(void) {
 
     motion_task_params.pir = &pir;
     motion_task_params.event_group = event_group;
-    motion_task_params.sensor_queue = sensor_queue;
     motion_task_params.uart_mutex = &uart_mutex;
 
     sensor_task_params.dht22 = &dht22;
