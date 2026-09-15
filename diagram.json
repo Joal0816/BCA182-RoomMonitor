@@ -2,6 +2,9 @@
   "version": 1,
   "author": "BCA182 Student",
   "editor": "wokwi",
+  "serialMonitor": {
+    "display": "always"
+  },
   "parts": [
     {
       "type": "board-stm32-bluepill",
