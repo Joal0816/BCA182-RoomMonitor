@@ -187,10 +187,6 @@ BCA182-RoomMonitor/
 │   ├── static-analysis.md
 │   ├── requirements-traceability.md
 │   └── limitations.md            # Known limitations & workarounds
-├── wokwi-arduino/                # Wokwi web simulation version
-│   ├── diagram.json
-│   ├── wokwi.toml
-│   └── src/main.cpp
 ├── diagram.json                  # Wokwi circuit diagram
 ├── wokwi.toml                    # Wokwi configuration
 ├── platformio.ini                # PlatformIO configuration
@@ -242,12 +238,9 @@ pio check
 2. Open the project folder
 3. Click the Wokwi icon → "Start Simulation"
 
-### Option 2: Wokwi Web Editor
-1. Go to [wokwi.com](https://wokwi.com)
-2. Create new project → Select "STM32 Blue Pill"
-3. Copy `wokwi-arduino/diagram.json` and `wokwi-arduino/src/main.cpp`
-4. Add libraries: DHT sensor library, Adafruit SSD1306, Adafruit GFX
-5. Click "Start Simulation"
+### Option 2: Wokwi Web Editor (Not Recommended)
+
+> The Wokwi web editor requires Arduino framework for STM32 Blue Pill, which violates the STM32Cube HAL requirement. Use the VSCode extension with this project's `diagram.json` and `platformio.ini` configuration for simulation. Visual verification of UART and OLED output requires hardware validation on a physical Blue Pill board.
 
 ---
 
