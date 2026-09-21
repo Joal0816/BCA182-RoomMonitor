@@ -218,42 +218,89 @@ All 10 functional tests pass, covering temperature display, humidity display, li
 
 ---
 
-## Challenges and Lessons Learned
+## Demonstration
 
-### 1. DHT22 Timing in Critical Section
-The DHT22 one-wire protocol requires precise microsecond timing. Using `taskENTER_CRITICAL()` with `HAL_Delay()` caused system hang because SysTick was blocked. **Solution:** Replaced `HAL_Delay()` with DWT cycle-counting (`DWT->CYCCNT`) for microsecond delays inside critical sections.
+The system was simulated and fully verified in Wokwi with all 7 peripheral components active:
 
-### 2. DHT22 Failure Triggers False Alarm
-When DHT22 read fails, temperature was set to 0.0°C, triggering a false LOW temperature alarm. **Solution:** Send `NAN` on failure and check `isnan()` in AlarmTask before evaluating.
+1. **Active Monitoring & Page Navigation:**
+   - The SSD1306 OLED displays current environmental telemetry.
+   - Turning the KY-040 rotary encoder cycles smoothly across the 4 display pages: **Page 0 (Temperature)**, **Page 1 (Humidity)**, **Page 2 (Ambient Light)**, and **Page 3 (Motion Detection)**.
+   - Wraparound navigation works seamlessly in both clockwise and counter-clockwise directions.
 
-### 3. Encoder Race Condition
-Reading and resetting the encoder position without synchronization lost ticks. **Solution:** Wrapped `Encoder_GetDelta()` in `taskENTER_CRITICAL()` / `taskEXIT_CRITICAL()`.
+2. **Acoustic & Visual Alarm Activation:**
+   - Setting the DHT22 temperature above 30.0°C triggers the buzzer PWM alert at PB8 (1000 Hz) within 2 seconds.
+   - Lowering the temperature below 28.0°C deactivates the alarm.
 
-### 4. Wokwi Simulation Limitation
-Wokwi's STM32 simulation supports GPIO (LED blinks correctly) but does not implement UART serial output or OLED display for STM32Cube HAL framework. **Solution:** Verified correctness through unit tests (33/33 pass) and GPIO execution. Documented limitation in lab report.
+3. **Power-Saving State Machine:**
+   - Triggering the PIR motion sensor maintains the system in the **ACTIVE** state (OLED on, full sensor polling).
+   - After 15 seconds without detected motion, the system automatically transitions to **INACTIVE** state, turning off the OLED display to conserve energy while leaving PIR interrupt monitoring active.
+   - Any subsequent motion event immediately restores the system to **ACTIVE** mode within 100 ms.
 
-### 5. FreeRTOS Stack Sizing
-Initial task stacks caused occasional overflows. **Solution:** Enabled `configCHECK_FOR_STACK_OVERFLOW = 2`, added `vApplicationStackOverflowHook` with diagnostic output, and sized all stacks with 2x safety margins.
+4. **Telemetry Logging:**
+   - Real-time diagnostic logs stream over USART1 (PA9, 115200 baud) without character corruption thanks to mutex synchronization.
+
+---
+
+## Challenges Encountered
+
+### 1. Dual-Consumer Queue Contention
+Initially, a single FreeRTOS queue was shared between `AlarmTask` and `DisplayTask`. Because FreeRTOS queues are destructive on read (`xQueueReceive()`), whichever task woke first consumed the sensor telemetry packet, causing the other task to starve until the next 2-second sampling interval.
+- **Resolution:** Refactored into a dual-queue fan-out architecture (`alarm_sensor_queue` and `display_sensor_queue`), each of depth 1. `SensorTask` updates both using `xQueueOverwrite()`, guaranteeing that both consumers always have immediate access to the latest sample.
+
+### 2. SSD1306 Virtual I2C Bus Bottleneck
+The original OLED driver updated the screen by transmitting 1,024 individual I2C transactions (one for each pixel byte). This saturated Wokwi's virtual I2C engine and caused the display to freeze.
+- **Resolution:** Rewrote `OLED_Update()` to transmit the full 1,025-byte frame buffer (`0x40` control byte + 1,024 data bytes) in a single bulk `HAL_I2C_Master_Transmit()` call, cutting I2C transaction overhead by 99.9%.
+
+### 3. DHT22 Microsecond Timing in Critical Sections
+The 1-wire protocol requires sub-millisecond bus timing. Calling `HAL_Delay()` inside a critical section locked the processor because the SysTick interrupt was masked.
+- **Resolution:** Used the ARM Cortex-M3 Data Watchpoint and Trace cycle counter (`DWT->CYCCNT`) running at 72 MHz (13.88 ns per tick) for precise microsecond delays without relying on interrupts.
+
+### 4. Sensor Failure False Alarms
+If a sensor read timed out or suffered parity error, default zero values triggered an erroneous LOW temperature alarm (<18°C).
+- **Resolution:** Flagged failed reads with `NAN` and verified validity via `isnan()` before evaluating alarm thresholds.
+
+---
+
+## Lessons Learned
+
+1. **`vTaskDelayUntil()` vs `vTaskDelay()`:** `vTaskDelay()` introduces accumulated drift over time equal to task execution duration. `vTaskDelayUntil()` calculates delays relative to the scheduled start time, ensuring zero cumulative drift for periodic sensing.
+2. **IPC Mechanism Selection:** Using a mutex for UART output prevents race conditions and interleaved text. Using an event group allows atomic multi-event signaling (motion, rotation, button press) without polling.
+3. **Queue Ownership:** Multi-consumer architectures require dedicated queues per consumer or a broadcast/overwrite design rather than a single shared FIFO queue.
+4. **Hardware Abstraction Layer (HAL) Isolation:** Decoupling decision logic (`src/app/logic/`) from peripheral drivers (`src/app/hal/`) enables comprehensive native unit testing on host PCs (33/33 tests passed in CI without target hardware).
+
+---
+
+## Limitations
+
+1. **DHT22 Blocking Read (~5 ms):** The single-wire read sequence holds the CPU for ~5 ms with interrupts masked. This represents only 0.25% of the 2-second sampling period and is deemed acceptable.
+2. **Single Buzzer Alarm:** Currently only temperature out-of-range conditions sound the buzzer; humidity and motion alarms are visual-only.
+3. **No Persistent Storage:** Telemetry is stored purely in volatile RAM; power cycling clears historical data.
+4. **Fixed Task Priorities:** Task priorities are configured statically at compile time rather than dynamically adapted.
 
 ---
 
 ## Future Improvements
 
-- **Wi-Fi connectivity** — Add ESP8266 for cloud logging via MQTT
-- **Data logging** — SD card or flash-based timestamped data storage
-- **Web dashboard** — Lightweight web interface for real-time visualization
-- **Battery power** — Deep sleep modes with wake-on-motion
-- **Additional sensors** — CO₂, air quality (MQ-135), barometric pressure
-- **OTA updates** — Over-the-air firmware updates via BLE/Wi-Fi
+- **Wi-Fi / MQTT Connectivity:** Integrate an ESP8266 or ESP32 to publish sensor telemetry to an MQTT broker or cloud dashboard.
+- **MicroSD Data Logging:** Implement an SPI SD card interface with a FAT32 filesystem for non-volatile sensor logging.
+- **Low-Power Sleep Modes:** Enter STM32 STOP or STANDBY mode during INACTIVE state with PIR EXTI wakeup to minimize battery draw.
+- **Multi-Tone Acoustic Alerts:** Differentiate alarm conditions by driving the buzzer at distinct PWM frequencies (e.g., 1000 Hz for temperature, 2000 Hz for humidity).
 
 ---
 
-## Resources
+## GitHub Repository
 
-- **GitHub Repository:** [github.com/Joal0816/BCA182-RoomMonitor](https://github.com/Joal0816/BCA182-RoomMonitor)
-- **PlatformIO Documentation:** [platformio.org](https://platformio.org/)
-- **FreeRTOS Reference:** [freertos.org](https://www.freertos.org/)
-- **STM32F103 Datasheet:** [STMicroelectronics](https://www.st.com/resource/en/datasheet/stm32f103c8.pdf)
+Complete source code, PlatformIO configuration, Wokwi diagram, unit tests, and documentation:
+- **Repository URL:** [https://github.com/Joal0816/BCA182-RoomMonitor](https://github.com/Joal0816/BCA182-RoomMonitor)
+
+---
+
+## References
+
+1. FreeRTOS Kernel Developer Guide: [https://www.freertos.org/](https://www.freertos.org/)
+2. STMicroelectronics STM32F103x8 Reference Manual (RM0008)
+3. SSD1306 128x64 Dot Matrix OLED Controller Datasheet
+4. Wokwi Simulator Documentation: [https://docs.wokwi.com/](https://docs.wokwi.com/)
 
 ---
 

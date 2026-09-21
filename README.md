@@ -1,5 +1,7 @@
 # BCA182 Real-Time Multisensor Room Monitoring System
 
+![BCA182 Room Monitoring System](docs/cover-image.png)
+
 ## Project Overview
 
 A real-time environmental monitoring system built on the **STM32 Blue Pill** using **FreeRTOS** and **PlatformIO**. The system monitors temperature, humidity, ambient light, and motion, displaying data on an SSD1306 OLED display with rotary encoder navigation. It features a power-saving state machine that blanks the display when no motion is detected.
@@ -227,20 +229,20 @@ pio check
 
 ## Running the Wokwi Simulation
 
-> **Note:** The Wokwi VSCode extension for STM32 Blue Pill has two known limitations:
-> - **UART output is unavailable** — neither `HAL_UART_Transmit()` nor direct register access produces serial output in the Wokwi terminal
-> - **OLED display is not rendered** — the I2C SSD1306 OLED does not produce visible output in simulation
-> 
-> These are inherent limitations of the Wokwi STM32 Blue Pill extension. Verify display and UART logic via native unit tests (`pio test -e native`) and hardware validation on a physical Blue Pill board. See [docs/limitations.md](docs/limitations.md) for full details.
+The project is fully simulated in Wokwi with working peripherals, including USART1 serial output (via `$serialMonitor`) and the SSD1306 OLED display (via bulk I2C buffer transmission).
 
-### Option 1: VSCode Extension
-1. Install "Wokwi Simulator" extension in VSCode
-2. Open the project folder
-3. Click the Wokwi icon → "Start Simulation"
+### Option 1: VSCode Extension (Recommended)
+1. Install the "Wokwi Simulator" extension in VSCode
+2. Open this project directory
+3. Press `F1` and select **Wokwi: Start Simulator** (or click `diagram.json` and press the Play button)
+4. Interact with the circuit:
+   - Click the DHT22 to adjust temperature/humidity sliders
+   - Click the KY-040 rotary encoder to rotate clockwise/counter-clockwise or press its button
+   - Click the PIR sensor to trigger simulated motion
+   - Observe the OLED display render 4 distinct pages and view real-time serial output in the terminal
 
-### Option 2: Wokwi Web Editor (Not Recommended)
-
-> The Wokwi web editor requires Arduino framework for STM32 Blue Pill, which violates the STM32Cube HAL requirement. Use the VSCode extension with this project's `diagram.json` and `platformio.ini` configuration for simulation. Visual verification of UART and OLED output requires hardware validation on a physical Blue Pill board.
+### Option 2: Physical Hardware Validation
+The same firmware binary (`.pio/build/bluepill_f103c8/firmware.bin`) can be flashed to an STM32F103C8T6 Blue Pill board via ST-Link V2 using `pio run -e bluepill_f103c8 -t upload`.
 
 ---
 
@@ -316,12 +318,12 @@ For a comprehensive analysis of all project limitations, their impact, mitigatio
 
 Key limitations include:
 
-- **DHT22 critical section**: The 1-wire protocol requires ~20ms of precise timing with interrupts masked, which can cause brief jitter in other tasks (acceptable at 2s sampling rate)
-- **Wokwi UART**: Serial output is unavailable in Wokwi simulation. Verification relies on native unit tests (33 tests) and hardware validation on physical Blue Pill
-- **Wokwi OLED**: I2C OLED display is not rendered in Wokwi. Display logic verified through native tests; visual verification requires hardware
-- **No calibration**: LDR readings are raw ADC values, not calibrated lux
-- **PIR simulation**: Wokwi's PIR model may not perfectly replicate real-world behavior
-- **Memory constraints**: STM32F103C8 has only 20KB RAM; task stacks are sized carefully
+- **DHT22 critical section**: The 1-wire protocol requires precise microsecond timing with interrupts masked, blocking SensorTask for ~5ms during readout (acceptable given the 2s sampling period)
+- **Single buzzer alarm**: Currently only temperature threshold violations trigger the acoustic buzzer; humidity and motion alarms are visual-only
+- **No persistent storage**: Environmental telemetry is maintained in RAM and not logged to flash or external EEPROM/SD
+- **Fixed compile-time priorities**: Task priorities are statically declared in firmware rather than dynamically adjusted at runtime
+- **LDR uncalibrated**: Light readings represent relative percentage based on ADC voltage division rather than calibrated lux
+- **Memory constraints**: STM32F103C8 has 20KB SRAM; FreeRTOS heap is sized at 12KB with carefully tuned task stacks
 
 ---
 

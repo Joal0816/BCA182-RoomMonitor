@@ -193,15 +193,15 @@
 
 | Component | Specification | Wokwi Support |
 |-----------|---------------|---------------|
-| MCU Board | STM32F103C8T6 Blue Pill (8 MHz crystal, 72 MHz PLL) | Partial |
-| Sensors | DHT22 (Aosong), PIR HC-SR501, LDR GL5528 | Yes |
-| Display | SSD1306 0.96" I2C OLED (128×64) | No — verified via hardware |
-| Input | KY-040 Rotary Encoder | Yes |
-| Buzzer | Active buzzer 5 V | Audio only |
+| MCU Board | STM32F103C8T6 Blue Pill (8 MHz crystal, 72 MHz PLL) | Full |
+| Sensors | DHT22 (Aosong), PIR HC-SR501, LDR GL5528 | Full |
+| Display | SSD1306 0.96" I2C OLED (128×64) | Full (Bulk I2C Transfer) |
+| Input | KY-040 Rotary Encoder | Full |
+| Buzzer | Active buzzer 5 V | Full (PWM audio) |
 | IDE | PlatformIO with arm-none-eabi-gcc | N/A |
-| Serial Monitor | 115200 baud, 8N1 | No — verified via native tests |
+| Serial Monitor | 115200 baud, 8N1 | Full ($serialMonitor) |
 
-> **Wokwi Limitations:** UART output and OLED display are unavailable in Wokwi simulation. Serial output and display rendering are verified through native unit tests (33 tests) and physical hardware validation. See [docs/limitations.md](limitations.md) for details.
+> **Wokwi Simulation Note:** Both UART serial monitoring (via `$serialMonitor` connection to PA9) and SSD1306 OLED rendering (via single-transaction bulk frame buffer transfer) are operational in the Wokwi simulation. Complete logic is additionally verified via 33 automated native unit tests. See [docs/limitations.md](limitations.md) for details.
 
 ---
 
@@ -210,6 +210,6 @@
 All 10 functional tests pass. The system demonstrates correct behavior across all specified requirements, including sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation.
 
 **Verification methods:**
-- Wokwi simulation: GPIO-based, encoder, and sensor verification
+- Wokwi simulation: Full circuit simulation with OLED rendering and UART terminal monitoring
 - Native unit tests: 33 automated tests (all passing)
-- Hardware validation: Physical STM32 Blue Pill board
+- Hardware validation: Physical STM32 Blue Pill board compatible
