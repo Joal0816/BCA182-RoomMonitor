@@ -3,7 +3,7 @@
 
 static void OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
-    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, 10);
+    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, HAL_MAX_DELAY);
 }
 
 static void OLED_SendData(OLED_t *oled, uint8_t data) {
@@ -52,6 +52,7 @@ void OLED_Clear(OLED_t *oled) {
 }
 
 void OLED_Update(OLED_t *oled) {
+    /* Set column and page address window to full screen */
     OLED_SendCommand(oled, 0x21);
     OLED_SendCommand(oled, 0);
     OLED_SendCommand(oled, OLED_WIDTH - 1);
@@ -59,9 +60,17 @@ void OLED_Update(OLED_t *oled) {
     OLED_SendCommand(oled, 0);
     OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1);
 
-    for (int i = 0; i < sizeof(oled->buffer); i++) {
-        OLED_SendData(oled, oled->buffer[i]);
+    /* Send entire frame buffer in ONE I2C transaction:
+     * [0x40][pixel0][pixel1]...[pixel1023]
+     * This avoids 1024 separate I2C transactions which is far too slow
+     * and causes Wokwi's I2C simulation to time out. */
+    static uint8_t tx_buf[1 + OLED_WIDTH * OLED_HEIGHT / 8];
+    tx_buf[0] = 0x40; /* Co=0, D/C#=1 — data stream */
+    for (int i = 0; i < (int)sizeof(oled->buffer); i++) {
+        tx_buf[1 + i] = oled->buffer[i];
     }
+    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                             tx_buf, sizeof(tx_buf), HAL_MAX_DELAY);
 }
 
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color) {
