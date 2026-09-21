@@ -14,8 +14,8 @@
 | L-02 | Single buzzer (temperature only) | Low | Future: add humidity/motion alarms | Accepted |
 | L-03 | No persistent storage | Medium | Future: add SD card / flash logging | Documented |
 | L-04 | Fixed (compile-time) priority scheme | Low | Priorities validated during design phase | Accepted |
-| L-05 | Wokwi UART output unavailable | High | Use GPIO LED debug + native unit tests | Mitigated |
-| L-06 | Wokwi OLED display unavailable | High | Use native logic tests + GPIO LED debug | Mitigated |
+| L-05 | Wokwi UART output unavailable | High | Wire PA9→$serialMonitor:RX in diagram.json | Fixed |
+| L-06 | Wokwi OLED display unavailable | High | Send frame buffer in one bulk I2C transaction | Fixed |
 
 ---
 
@@ -162,8 +162,8 @@ Given the Wokwi UART and OLED limitations, the project employs a three-tier veri
 | L-02 Single buzzer | Low | Medium — documented for future | Low |
 | L-03 No storage | Medium | Medium — acceptable for scope | Medium |
 | L-04 Fixed priority | Low | High — validated via experiments | Very Low |
-| L-05 No UART in Wokwi | High | High — native tests cover logic | Low (post-hardware) |
-| L-06 No OLED in Wokwi | High | High — native tests cover logic | Low (post-hardware) |
+| L-05 No UART in Wokwi | High | Resolved — PA9 wired to serialMonitor | None |
+| L-06 No OLED in Wokwi | High | Resolved — bulk I2C transfer fixed rendering | None |
 
 ---
 
