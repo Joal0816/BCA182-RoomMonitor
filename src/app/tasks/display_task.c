@@ -69,6 +69,12 @@ void DisplayTask(void *pvParameters) {
     for (;;) {
         xQueueReceive(params->display_page_queue, &current_page, 0);
 
+        /* Consume event bits here: InputTask and MotionTask use the event
+           group as an RTOS-level event channel, while queues carry payloads. */
+        (void)xEventGroupClearBits(params->event_group,
+                                   MOTION_DETECTED_BIT | ENCODER_CW_BIT |
+                                   ENCODER_CCW_BIT | ENCODER_BTN_BIT);
+
         if (xQueueReceive(params->sensor_queue, &data, 0) == pdPASS) {
             SystemState_t state = StateMachine_GetState(params->state_machine);
 

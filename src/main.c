@@ -46,6 +46,7 @@ static Alarm_t alarm;
 static UART_Mutex_t uart_mutex;
 
 static QueueHandle_t sensor_queue;
+static QueueHandle_t display_sensor_queue;
 static QueueHandle_t display_page_queue;
 static EventGroupHandle_t event_group;
 
@@ -80,7 +81,8 @@ int main(void) {
     Alarm_Init(&alarm, &buzzer);
     UART_Mutex_Init(&uart_mutex, &huart1);
 
-    sensor_queue = xQueueCreate(5, sizeof(SensorData_t));
+    sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
+    display_sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
     display_page_queue = xQueueCreate(1, sizeof(DisplayPage_t));
     event_group = xEventGroupCreate();
 
@@ -96,7 +98,8 @@ int main(void) {
     sensor_task_params.dht22 = &dht22;
     sensor_task_params.ldr = &ldr;
     sensor_task_params.pir = &pir;
-    sensor_task_params.sensor_queue = sensor_queue;
+    sensor_task_params.alarm_queue = sensor_queue;
+    sensor_task_params.display_queue = display_sensor_queue;
     sensor_task_params.uart_mutex = &uart_mutex;
 
     alarm_task_params.sensor_queue = sensor_queue;
@@ -105,9 +108,10 @@ int main(void) {
     alarm_task_params.uart_mutex = &uart_mutex;
 
     display_task_params.oled = &oled;
-    display_task_params.sensor_queue = sensor_queue;
+    display_task_params.sensor_queue = display_sensor_queue;
     display_task_params.display_page_queue = display_page_queue;
     display_task_params.state_machine = &state_machine;
+    display_task_params.event_group = event_group;
     display_task_params.uart_mutex = &uart_mutex;
 
     xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
@@ -236,6 +240,58 @@ static void MX_USART1_UART_Init(void) {
     huart1.Init.OverSampling = UART_OVERSAMPLING_16;
     if (HAL_UART_Init(&huart1) != HAL_OK) {
         Error_Handler();
+    }
+}
+
+void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    if (hi2c->Instance == I2C1) {
+        __HAL_RCC_I2C1_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+        GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    }
+}
+
+void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc) {
+    if (hadc->Instance == ADC1) {
+        __HAL_RCC_ADC1_CLK_ENABLE();
+        __HAL_RCC_GPIOA_CLK_ENABLE();
+        GPIO_InitTypeDef GPIO_InitStruct = {0};
+        GPIO_InitStruct.Pin = GPIO_PIN_0;
+        GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    }
+}
+
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef *htim) {
+    if (htim->Instance == TIM4) {
+        __HAL_RCC_TIM4_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+        GPIO_InitTypeDef GPIO_InitStruct = {0};
+        GPIO_InitStruct.Pin = GPIO_PIN_8;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    }
+}
+
+void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        __HAL_RCC_USART1_CLK_ENABLE();
+        __HAL_RCC_GPIOA_CLK_ENABLE();
+        GPIO_InitTypeDef GPIO_InitStruct = {0};
+        GPIO_InitStruct.Pin = GPIO_PIN_9;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+        GPIO_InitStruct.Pin = GPIO_PIN_10;
+        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+        GPIO_InitStruct.Pull = GPIO_NOPULL;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     }
 }
 

@@ -11,7 +11,8 @@ typedef struct {
     DHT22_t *dht22;
     LDR_t *ldr;
     PIR_t *pir;
-    QueueHandle_t sensor_queue;
+    QueueHandle_t alarm_queue;
+    QueueHandle_t display_queue;
     UART_Mutex_t *uart_mutex;
 } SensorTaskParams_t;
 

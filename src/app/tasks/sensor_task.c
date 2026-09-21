@@ -30,8 +30,12 @@ void SensorTask(void *pvParameters) {
 
         data.motion_detected = PIR_GetState(params->pir);
 
+        /* Publish the sample independently so AlarmTask and DisplayTask do
+           not compete for the same queue item.  A length-one queue keeps the
+           latest sample when a consumer is busy rendering or alarming. */
         if (read_ok) {
-            xQueueSend(params->sensor_queue, &data, 0);
+            xQueueOverwrite(params->alarm_queue, &data);
+            xQueueOverwrite(params->display_queue, &data);
         }
 
         UART_Mutex_Printf(params->uart_mutex,

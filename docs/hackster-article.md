@@ -125,7 +125,8 @@ Room monitoring systems are fundamental to IoT and smart building applications. 
 
 | Primitive | Type | Producer | Consumer | Purpose |
 |-----------|------|----------|----------|---------|
-| sensor_queue | Queue (depth 5) | SensorTask | AlarmTask, DisplayTask | Transmit SensorData_t |
+| alarm_sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t |
+| display_sensor_queue | Queue (depth 1) | SensorTask | DisplayTask | Latest SensorData_t |
 | display_page_queue | Queue (depth 1) | InputTask | DisplayTask | Current display page |
 | event_group | Event Group | MotionTask, InputTask | DisplayTask | Motion/encoder events |
 | uart_mutex | Mutex | Any task | UART1 | Protect serial output |
@@ -138,7 +139,7 @@ Room monitoring systems are fundamental to IoT and smart building applications. 
 On power-up, HAL initializes clocks, GPIO, I2C, ADC, and UART peripherals. FreeRTOS creates all 5 tasks, queues, event groups, and mutexes, then starts the scheduler.
 
 ### Step 2: Sensor Data Acquisition
-SensorTask reads DHT22 (temperature + humidity) via one-wire protocol, samples LDR through ADC (12-bit), and checks PIR digital output. Data is sent to AlarmTask and DisplayTask via queue.
+SensorTask reads DHT22 (temperature + humidity) via one-wire protocol, samples LDR through ADC (12-bit), and checks PIR digital output. It publishes the latest sample to independent alarm and display queues so both consumers receive every valid reading.
 
 ### Step 3: State Machine
 StateMachine_Update() checks PIR sensor. If motion detected → ACTIVE mode. After 15 seconds without motion → INACTIVE mode (OLED blank, reduced operations). Motion immediately restores ACTIVE.

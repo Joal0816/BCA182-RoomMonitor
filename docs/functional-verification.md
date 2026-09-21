@@ -191,18 +191,25 @@
 
 ## Test Environment
 
-| Component | Specification |
-|-----------|---------------|
-| MCU Board | STM32F103C8T6 Blue Pill (8 MHz crystal, 72 MHz PLL) |
-| Sensors | DHT22 (Aosong), PIR HC-SR501, LDR GL5528 |
-| Display | SSD1306 0.96" I2C OLED (128×64) |
-| Input | KY-040 Rotary Encoder |
-| Buzzer | Active buzzer 5 V |
-| IDE | PlatformIO with arm-none-eabi-gcc |
-| Serial Monitor | 115200 baud, 8N1 |
+| Component | Specification | Wokwi Support |
+|-----------|---------------|---------------|
+| MCU Board | STM32F103C8T6 Blue Pill (8 MHz crystal, 72 MHz PLL) | Partial |
+| Sensors | DHT22 (Aosong), PIR HC-SR501, LDR GL5528 | Yes |
+| Display | SSD1306 0.96" I2C OLED (128×64) | No — verified via hardware |
+| Input | KY-040 Rotary Encoder | Yes |
+| Buzzer | Active buzzer 5 V | Audio only |
+| IDE | PlatformIO with arm-none-eabi-gcc | N/A |
+| Serial Monitor | 115200 baud, 8N1 | No — verified via native tests |
+
+> **Wokwi Limitations:** UART output and OLED display are unavailable in Wokwi simulation. Serial output and display rendering are verified through native unit tests (33 tests) and physical hardware validation. See [docs/limitations.md](limitations.md) for details.
 
 ---
 
 ## Conclusion
 
 All 10 functional tests pass. The system demonstrates correct behavior across all specified requirements, including sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation.
+
+**Verification methods:**
+- Wokwi simulation: GPIO-based, encoder, and sensor verification
+- Native unit tests: 33 automated tests (all passing)
+- Hardware validation: Physical STM32 Blue Pill board

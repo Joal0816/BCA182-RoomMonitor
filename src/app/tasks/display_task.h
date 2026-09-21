@@ -11,6 +11,7 @@ typedef struct {
     OLED_t *oled;
     QueueHandle_t sensor_queue;
     QueueHandle_t display_page_queue;
+    EventGroupHandle_t event_group;
     StateMachine_t *state_machine;
     UART_Mutex_t *uart_mutex;
 } DisplayTaskParams_t;

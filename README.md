@@ -81,11 +81,11 @@ This laboratory demonstrates:
 
 | Task | Responsibility | Trigger/Period | Priority | IPC | Typical Blocked Condition |
 |------|---------------|----------------|----------|-----|--------------------------|
-| SensorTask | Read DHT22 + LDR | 1s periodic | 2 | Queue (sensor_queue) | `vTaskDelayUntil()` |
-| DisplayTask | Manage OLED | Event/update | 1 | Queue (display_page_queue) | Waiting for data |
+| SensorTask | Read DHT22 + LDR | 1s periodic | 2 | Alarm/display queues | `vTaskDelayUntil()` |
+| DisplayTask | Manage OLED | Event/update | 1 | `display_sensor_queue`, `display_page_queue`, event group | Waiting for data |
 | InputTask | Process encoder | Event-driven | 3 | Event Group | `ulTaskNotifyTake()` |
 | MotionTask | Monitor PIR | Event-driven | 3 | Event Group | `ulTaskNotifyTake()` |
-| AlarmTask | Evaluate alarm + control buzzer | Sensor update | 2 | Queue (sensor_queue) | `xQueueReceive()` |
+| AlarmTask | Evaluate alarm + control buzzer | Sensor update | 2 | `alarm_sensor_queue` | `xQueueReceive()` |
 
 ### Priority Justification
 
@@ -97,7 +97,8 @@ This laboratory demonstrates:
 
 | Primitive | Type | Producer | Consumer | Purpose |
 |-----------|------|----------|----------|---------|
-| sensor_queue | Queue (depth 5) | SensorTask | AlarmTask, DisplayTask | Transmit SensorData_t structs |
+| alarm_sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t for alarm evaluation |
+| display_sensor_queue | Queue (depth 1) | SensorTask | DisplayTask | Latest SensorData_t for OLED rendering |
 | display_page_queue | Queue (depth 1) | InputTask | DisplayTask | Current display page |
 | event_group | Event Group | MotionTask, InputTask | DisplayTask | Motion detected, encoder events |
 | uart_mutex | Mutex | Any task | UART1 | Protect serial output from interleaving |
@@ -184,7 +185,8 @@ BCA182-RoomMonitor/
 │   ├── functional-verification.md
 │   ├── fault-experiments.md
 │   ├── static-analysis.md
-│   └── requirements-traceability.md
+│   ├── requirements-traceability.md
+│   └── limitations.md            # Known limitations & workarounds
 ├── wokwi-arduino/                # Wokwi web simulation version
 │   ├── diagram.json
 │   ├── wokwi.toml
@@ -228,6 +230,12 @@ pio check
 ---
 
 ## Running the Wokwi Simulation
+
+> **Note:** The Wokwi VSCode extension for STM32 Blue Pill has two known limitations:
+> - **UART output is unavailable** — neither `HAL_UART_Transmit()` nor direct register access produces serial output in the Wokwi terminal
+> - **OLED display is not rendered** — the I2C SSD1306 OLED does not produce visible output in simulation
+> 
+> These are inherent limitations of the Wokwi STM32 Blue Pill extension. Verify display and UART logic via native unit tests (`pio test -e native`) and hardware validation on a physical Blue Pill board. See [docs/limitations.md](docs/limitations.md) for full details.
 
 ### Option 1: VSCode Extension
 1. Install "Wokwi Simulator" extension in VSCode
@@ -311,7 +319,13 @@ Multiple tasks print diagnostic messages. Without a mutex, outputs interleave mi
 
 ## Limitations
 
-- **DHT22 critical section**: The 1-wire protocol requires ~20ms of precise timing with interrupts masked, which can cause brief jitter in other tasks
+For a comprehensive analysis of all project limitations, their impact, mitigation strategies, and risk assessment, see [docs/limitations.md](docs/limitations.md).
+
+Key limitations include:
+
+- **DHT22 critical section**: The 1-wire protocol requires ~20ms of precise timing with interrupts masked, which can cause brief jitter in other tasks (acceptable at 2s sampling rate)
+- **Wokwi UART**: Serial output is unavailable in Wokwi simulation. Verification relies on native unit tests (33 tests) and hardware validation on physical Blue Pill
+- **Wokwi OLED**: I2C OLED display is not rendered in Wokwi. Display logic verified through native tests; visual verification requires hardware
 - **No calibration**: LDR readings are raw ADC values, not calibrated lux
 - **PIR simulation**: Wokwi's PIR model may not perfectly replicate real-world behavior
 - **Memory constraints**: STM32F103C8 has only 20KB RAM; task stacks are sized carefully
