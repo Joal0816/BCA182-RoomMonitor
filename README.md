@@ -177,7 +177,7 @@ BCA182-RoomMonitor/
 │   └── drivers/
 │       └── uart_mutex.c/.h       # UART mutex wrapper
 ├── include/
-│   └── FreeRTOSConfig.h          # FreeRTOS config (for library)
+│   └── README                    # PlatformIO include directory
 ├── test/
 │   ├── test_temperature/         # 15 temperature boundary tests
 │   ├── test_encoder/             # 10 encoder navigation tests
