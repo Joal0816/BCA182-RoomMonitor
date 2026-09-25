@@ -10,7 +10,7 @@
 typedef struct {
     I2C_HandleTypeDef *hi2c;
     uint8_t buffer[OLED_WIDTH * OLED_HEIGHT / 8];
-    uint8_t ready;
+    volatile uint8_t ready;
 } OLED_t;
 
 HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);

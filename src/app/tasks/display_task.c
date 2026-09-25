@@ -3,7 +3,7 @@
 #include <string.h>
 
 /*
- * DisplayTask (priority 1) - sole owner of the SSD1306 OLED.
+ * DisplayTask (priority 1) - sole owner of SSD1306 rendering and I2C access.
  *
  * It blocks waiting for new sensor samples / page selections. While the
  * system is INACTIVE the panel is switched off (see Part IX of the lab) and
@@ -74,24 +74,33 @@ void DisplayTask(void *pvParameters) {
 
     if (!params->oled->ready) {
         UART_Mutex_Printf(params->uart_mutex,
-                          "[DISPLAY] OLED unavailable; display task stopped\r\n");
-        vTaskDelete(NULL);
-        return;
+                          "[DISPLAY] OLED unavailable; retrying\r\n");
     }
 
-    OLED_Clear(params->oled);
-    OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
-    if (OLED_Update(params->oled) != HAL_OK) {
-        params->oled->ready = 0;
-        UART_Mutex_Printf(params->uart_mutex,
-                          "[DISPLAY] OLED update failed; display task stopped\r\n");
-        vTaskDelete(NULL);
-        return;
+    if (params->oled->ready) {
+        OLED_Clear(params->oled);
+        OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
+        if (OLED_Update(params->oled) != HAL_OK) {
+            params->oled->ready = 0;
+            UART_Mutex_Printf(params->uart_mutex,
+                              "[DISPLAY] OLED update failed; retrying\r\n");
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
 
     for (;;) {
+        if (!params->oled->ready) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (OLED_Init(params->oled, params->oled->hi2c) == HAL_OK) {
+                blanked = 0;
+                have_data = 0;
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[DISPLAY] OLED recovered\r\n");
+            }
+            continue;
+        }
+
         xQueueReceive(params->display_page_queue, &current_page, 0);
 
         if (xQueueReceive(params->display_queue, &data, 0) == pdPASS) {
@@ -109,9 +118,8 @@ void DisplayTask(void *pvParameters) {
                     OLED_DisplayOff(params->oled) != HAL_OK) {
                     params->oled->ready = 0;
                     UART_Mutex_Printf(params->uart_mutex,
-                                      "[DISPLAY] OLED communication failed; display task stopped\r\n");
-                    vTaskDelete(NULL);
-                    return;
+                                      "[DISPLAY] OLED communication failed; retrying\r\n");
+                    continue;
                 }
                 blanked = 1;
                 UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED blanked (INACTIVE)\r\n");
@@ -124,9 +132,8 @@ void DisplayTask(void *pvParameters) {
             if (OLED_DisplayOn(params->oled) != HAL_OK) {
                 params->oled->ready = 0;
                 UART_Mutex_Printf(params->uart_mutex,
-                                  "[DISPLAY] OLED communication failed; display task stopped\r\n");
-                vTaskDelete(NULL);
-                return;
+                                  "[DISPLAY] OLED communication failed; retrying\r\n");
+                continue;
             }
             blanked = 0;
             UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED restored (ACTIVE)\r\n");
@@ -156,9 +163,8 @@ void DisplayTask(void *pvParameters) {
             if (OLED_Update(params->oled) != HAL_OK) {
                 params->oled->ready = 0;
                 UART_Mutex_Printf(params->uart_mutex,
-                                  "[DISPLAY] OLED update failed; display task stopped\r\n");
-                vTaskDelete(NULL);
-                return;
+                                  "[DISPLAY] OLED update failed; retrying\r\n");
+                continue;
             }
         }
 
