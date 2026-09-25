@@ -1,35 +1,12 @@
 #include "unity.h"
+#include "logic/temperature.h"
 
-#define TEMP_LOW_THRESHOLD  18.0f
-#define TEMP_HIGH_THRESHOLD 30.0f
-
-typedef enum {
-    TEMP_LOW = 0,
-    TEMP_NORMAL,
-    TEMP_HIGH
-} TempStatus_t;
-
-TempStatus_t EvaluateTemperature(float temperature) {
-    if (temperature < TEMP_LOW_THRESHOLD) {
-        return TEMP_LOW;
-    } else if (temperature > TEMP_HIGH_THRESHOLD) {
-        return TEMP_HIGH;
-    }
-    return TEMP_NORMAL;
-}
-
-const char* Temperature_GetStatusString(TempStatus_t status) {
-    switch (status) {
-        case TEMP_LOW:    return "LOW";
-        case TEMP_NORMAL: return "NORMAL";
-        case TEMP_HIGH:   return "HIGH";
-        default:          return "UNKNOWN";
-    }
-}
-
-uint8_t Temperature_IsAlarm(TempStatus_t status) {
-    return (status != TEMP_NORMAL);
-}
+/*
+ * Temperature alarm logic tests.
+ * These exercise the production implementation in
+ * src/app/logic/temperature.c (linked into the native test environment),
+ * not a re-declared copy.
+ */
 
 void setUp(void) {}
 void tearDown(void) {}
