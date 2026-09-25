@@ -42,8 +42,16 @@ void SensorTask(void *pvParameters) {
         data.motion_detected = PIR_GetState(params->pir);
 
         if (read_ok) {
-            xQueueSend(params->alarm_queue, &data, 0);
-            xQueueSend(params->display_queue, &data, 0);
+            if (xQueueSend(params->alarm_queue, &data,
+                           pdMS_TO_TICKS(QUEUE_SEND_TIMEOUT_MS)) != pdPASS) {
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[SENSOR] Alarm queue full; sample dropped\r\n");
+            }
+            if (xQueueSend(params->display_queue, &data,
+                           pdMS_TO_TICKS(QUEUE_SEND_TIMEOUT_MS)) != pdPASS) {
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[SENSOR] Display queue full; sample dropped\r\n");
+            }
         }
 
         UART_Mutex_Printf(params->uart_mutex,

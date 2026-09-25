@@ -84,7 +84,9 @@ int app_main(void) {
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
-    OLED_Init(&oled, &hi2c1);
+    if (OLED_Init(&oled, &hi2c1) != HAL_OK) {
+        HAL_UART_Transmit(&huart1, (uint8_t *)"[BOOT] OLED not detected\r\n", 26, 100);
+    }
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
@@ -229,6 +231,9 @@ static void MX_I2C1_Init(void) {
 static void MX_ADC1_Init(void) {
     ADC_ChannelConfTypeDef sConfig = {0};
 
+    /* Keep the ADC clock within the STM32F1 maximum of 14 MHz. */
+    __HAL_RCC_ADC_CONFIG(RCC_ADCPCLK2_DIV6);
+
     hadc1.Instance = ADC1;
     hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
     hadc1.Init.ContinuousConvMode = DISABLE;
@@ -289,15 +294,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
     if (GPIO_Pin == GPIO_PIN_0) {
         PIR_EXTI_Callback(&pir);
-        vTaskNotifyGiveFromISR(motion_task_params.task_handle, &xHigherPriorityTaskWoken);
+        if (motion_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(motion_task_params.task_handle,
+                                   &xHigherPriorityTaskWoken);
+        }
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_2) {
         Encoder_CLK_EXTI_Callback(&encoder);
-        vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
+        if (input_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(input_task_params.task_handle,
+                                   &xHigherPriorityTaskWoken);
+        }
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_4) {
         encoder.button_pressed = 1;
-        vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
+        if (input_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(input_task_params.task_handle,
+                                   &xHigherPriorityTaskWoken);
+        }
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }

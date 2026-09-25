@@ -54,6 +54,24 @@
       }
     },
     {
+      "type": "wokwi-resistor",
+      "id": "i2c_pullup_scl",
+      "top": 120,
+      "left": 390,
+      "attrs": {
+        "value": "4.7k"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "i2c_pullup_sda",
+      "top": 160,
+      "left": 390,
+      "attrs": {
+        "value": "4.7k"
+      }
+    },
+    {
       "type": "wokwi-ky-040",
       "id": "encoder",
       "top": 360,
@@ -85,6 +103,10 @@
     ["mcu:GND.1", "oled:GND", "black", ["v0"]],
     ["mcu:B6", "oled:SCL", "blue", ["v0"]],
     ["mcu:B7", "oled:SDA", "magenta", ["v0"]],
+    ["mcu:3V3.1", "i2c_pullup_scl:1", "red", ["v20"]],
+    ["i2c_pullup_scl:2", "oled:SCL", "blue", ["v0"]],
+    ["mcu:3V3.1", "i2c_pullup_sda:1", "red", ["v20"]],
+    ["i2c_pullup_sda:2", "oled:SDA", "magenta", ["v0"]],
     ["mcu:3V3.1", "encoder:VCC", "red", ["v60"]],
     ["mcu:GND.1", "encoder:GND", "black", ["v60"]],
     ["mcu:A2", "encoder:CLK", "cyan", ["v40"]],

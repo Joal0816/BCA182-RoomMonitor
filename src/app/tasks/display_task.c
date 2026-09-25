@@ -72,6 +72,13 @@ void DisplayTask(void *pvParameters) {
     uint8_t have_data = 0;
     uint8_t blanked = 0;
 
+    if (!params->oled->ready) {
+        UART_Mutex_Printf(params->uart_mutex,
+                          "[DISPLAY] OLED unavailable; display task stopped\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
     OLED_Update(params->oled);

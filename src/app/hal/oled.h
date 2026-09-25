@@ -10,13 +10,14 @@
 typedef struct {
     I2C_HandleTypeDef *hi2c;
     uint8_t buffer[OLED_WIDTH * OLED_HEIGHT / 8];
+    uint8_t ready;
 } OLED_t;
 
-void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
+HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
 void OLED_DisplayOn(OLED_t *oled);
 void OLED_DisplayOff(OLED_t *oled);
 void OLED_Clear(OLED_t *oled);
-void OLED_Update(OLED_t *oled);
+HAL_StatusTypeDef OLED_Update(OLED_t *oled);
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color);
 void OLED_DrawChar(OLED_t *oled, uint8_t x, uint8_t y, char c, uint8_t size);
 void OLED_DrawString(OLED_t *oled, uint8_t x, uint8_t y, const char *str, uint8_t size);

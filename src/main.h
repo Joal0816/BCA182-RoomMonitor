@@ -43,6 +43,7 @@ typedef struct {
 #define DISPLAY_REFRESH_MS     100U
 #define STATE_POLL_PERIOD_MS   250U
 #define MOTION_POLL_PERIOD_MS  500U
+#define QUEUE_SEND_TIMEOUT_MS   50U
 
 void Error_Handler(void);
 

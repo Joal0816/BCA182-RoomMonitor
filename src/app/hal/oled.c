@@ -1,56 +1,72 @@
 #include "oled.h"
 #include "font.h"
 
-static void OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
+static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
-    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, 10);
+    return HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, 100);
 }
 
-static void OLED_SendData(OLED_t *oled, uint8_t data) {
-    uint8_t buf[2] = {0x40, data};
-    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, buf, 2, 10);
+static HAL_StatusTypeDef OLED_SendData(OLED_t *oled, const uint8_t *data, uint16_t size) {
+    uint8_t buffer[OLED_WIDTH + 1];
+
+    if (size > OLED_WIDTH) {
+        return HAL_ERROR;
+    }
+
+    buffer[0] = 0x40;
+    for (uint16_t i = 0; i < size; i++) {
+        buffer[i + 1] = data[i];
+    }
+    return HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                                   buffer, size + 1, 100);
 }
 
-void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
+HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     oled->hi2c = hi2c;
+    oled->ready = 0;
     HAL_Delay(100);
 
-    OLED_SendCommand(oled, 0xAE);
-    OLED_SendCommand(oled, 0xD5);
-    OLED_SendCommand(oled, 0x80);
-    OLED_SendCommand(oled, 0xA8);
-    OLED_SendCommand(oled, 0x3F);
-    OLED_SendCommand(oled, 0xD3);
-    OLED_SendCommand(oled, 0x00);
-    OLED_SendCommand(oled, 0x40);
-    OLED_SendCommand(oled, 0x8D);
-    OLED_SendCommand(oled, 0x14);
-    OLED_SendCommand(oled, 0x20);
-    OLED_SendCommand(oled, 0x00);
-    OLED_SendCommand(oled, 0xA1);
-    OLED_SendCommand(oled, 0xC8);
-    OLED_SendCommand(oled, 0xDA);
-    OLED_SendCommand(oled, 0x12);
-    OLED_SendCommand(oled, 0x81);
-    OLED_SendCommand(oled, 0xCF);
-    OLED_SendCommand(oled, 0xD9);
-    OLED_SendCommand(oled, 0xF1);
-    OLED_SendCommand(oled, 0xDB);
-    OLED_SendCommand(oled, 0x40);
-    OLED_SendCommand(oled, 0xA4);
-    OLED_SendCommand(oled, 0xA6);
-    OLED_SendCommand(oled, 0xAF);
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+        if (HAL_I2C_IsDeviceReady(oled->hi2c, OLED_I2C_ADDR << 1, 1, 100) == HAL_OK) {
+            oled->ready = 1;
+            break;
+        }
+        HAL_Delay(10);
+    }
+    if (!oled->ready) {
+        return HAL_ERROR;
+    }
+
+    static const uint8_t init_commands[] = {
+        0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
+        0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
+        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF
+    };
+    for (uint8_t i = 0; i < sizeof(init_commands); i++) {
+        if (OLED_SendCommand(oled, init_commands[i]) != HAL_OK) {
+            oled->ready = 0;
+            return HAL_ERROR;
+        }
+    }
 
     OLED_Clear(oled);
-    OLED_Update(oled);
+    if (OLED_Update(oled) != HAL_OK) {
+        oled->ready = 0;
+        return HAL_ERROR;
+    }
+    return HAL_OK;
 }
 
 void OLED_DisplayOn(OLED_t *oled) {
-    OLED_SendCommand(oled, 0xAF);
+    if (oled->ready) {
+        OLED_SendCommand(oled, 0xAF);
+    }
 }
 
 void OLED_DisplayOff(OLED_t *oled) {
-    OLED_SendCommand(oled, 0xAE);
+    if (oled->ready) {
+        OLED_SendCommand(oled, 0xAE);
+    }
 }
 
 void OLED_Clear(OLED_t *oled) {
@@ -59,17 +75,26 @@ void OLED_Clear(OLED_t *oled) {
     }
 }
 
-void OLED_Update(OLED_t *oled) {
-    OLED_SendCommand(oled, 0x21);
-    OLED_SendCommand(oled, 0);
-    OLED_SendCommand(oled, OLED_WIDTH - 1);
-    OLED_SendCommand(oled, 0x22);
-    OLED_SendCommand(oled, 0);
-    OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1);
-
-    for (int i = 0; i < sizeof(oled->buffer); i++) {
-        OLED_SendData(oled, oled->buffer[i]);
+HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
+    if (!oled->ready) {
+        return HAL_ERROR;
     }
+
+    if (OLED_SendCommand(oled, 0x21) != HAL_OK ||
+        OLED_SendCommand(oled, 0) != HAL_OK ||
+        OLED_SendCommand(oled, OLED_WIDTH - 1) != HAL_OK ||
+        OLED_SendCommand(oled, 0x22) != HAL_OK ||
+        OLED_SendCommand(oled, 0) != HAL_OK ||
+        OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    for (uint8_t page = 0; page < OLED_HEIGHT / 8; page++) {
+        if (OLED_SendData(oled, &oled->buffer[page * OLED_WIDTH], OLED_WIDTH) != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    return HAL_OK;
 }
 
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color) {
