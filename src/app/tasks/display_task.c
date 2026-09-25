@@ -93,11 +93,17 @@ void DisplayTask(void *pvParameters) {
 
     for (;;) {
         if (!params->oled->ready) {
-            EventBits_t retry_bits = xEventGroupGetBits(params->event_group);
-            uint8_t retry_active = (retry_bits & EVENT_STATE_ACTIVE_BIT) != 0;
             vTaskDelay(pdMS_TO_TICKS(500));
             if (OLED_Init(params->oled, params->oled->hi2c) == HAL_OK) {
+                EventBits_t retry_bits = xEventGroupGetBits(params->event_group);
+                uint8_t retry_active = (retry_bits & EVENT_STATE_ACTIVE_BIT) != 0;
                 blanked = retry_active ? 0 : 1;
+                if (!retry_active && OLED_DisplayOff(params->oled) != HAL_OK) {
+                    params->oled->ready = 0;
+                    UART_Mutex_Printf(params->uart_mutex,
+                                      "[DISPLAY] OLED power-state update failed; retrying\r\n");
+                    continue;
+                }
                 UART_Mutex_Printf(params->uart_mutex,
                                   "[DISPLAY] OLED recovered\r\n");
             } else {
