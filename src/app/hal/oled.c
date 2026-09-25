@@ -45,6 +45,14 @@ void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     OLED_Update(oled);
 }
 
+void OLED_DisplayOn(OLED_t *oled) {
+    OLED_SendCommand(oled, 0xAF);
+}
+
+void OLED_DisplayOff(OLED_t *oled) {
+    OLED_SendCommand(oled, 0xAE);
+}
+
 void OLED_Clear(OLED_t *oled) {
     for (int i = 0; i < sizeof(oled->buffer); i++) {
         oled->buffer[i] = 0;

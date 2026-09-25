@@ -1,5 +1,13 @@
 #include "input_task.h"
+#include "logic/display_page.h"
 
+/*
+ * InputTask (priority 3) - processes rotary-encoder navigation.
+ *
+ * The encoder EXTI line notifies this task directly (task notification), so
+ * the task is event driven and blocks indefinitely when idle. Page transitions
+ * use the hardware-independent DisplayPage_* logic that is unit tested.
+ */
 void InputTask(void *pvParameters) {
     InputTaskParams_t *params = (InputTaskParams_t *)pvParameters;
     DisplayPage_t current_page = PAGE_TEMPERATURE;
@@ -10,18 +18,17 @@ void InputTask(void *pvParameters) {
         int8_t delta = Encoder_GetDelta(params->encoder);
 
         if (delta > 0) {
-            current_page = (DisplayPage_t)((current_page + 1) % PAGE_COUNT);
-            xEventGroupSetBits(params->event_group, ENCODER_CW_BIT);
-            UART_Mutex_Printf(params->uart_mutex, "[INPUT] Page CW -> %d\r\n", current_page);
+            current_page = DisplayPage_Next(current_page);
+            UART_Mutex_Printf(params->uart_mutex, "[INPUT] CW  -> %s\r\n",
+                              DisplayPage_Name(current_page));
         } else if (delta < 0) {
-            current_page = (DisplayPage_t)((current_page + PAGE_COUNT - 1) % PAGE_COUNT);
-            xEventGroupSetBits(params->event_group, ENCODER_CCW_BIT);
-            UART_Mutex_Printf(params->uart_mutex, "[INPUT] Page CCW -> %d\r\n", current_page);
+            current_page = DisplayPage_Previous(current_page);
+            UART_Mutex_Printf(params->uart_mutex, "[INPUT] CCW -> %s\r\n",
+                              DisplayPage_Name(current_page));
         }
 
         if (Encoder_IsButtonPressed(params->encoder)) {
             Encoder_ClearButton(params->encoder);
-            xEventGroupSetBits(params->event_group, ENCODER_BTN_BIT);
             UART_Mutex_Printf(params->uart_mutex, "[INPUT] Button pressed\r\n");
         }
 

@@ -8,6 +8,10 @@
 #include "semphr.h"
 #include "event_groups.h"
 
+#include "logic/temperature.h"
+#include "logic/state_machine.h"
+#include "logic/display_page.h"
+
 #define SYSTEM_CLOCK_HZ  72000000U
 #define LED_BLINK_DELAY  500U
 
@@ -19,36 +23,26 @@ typedef struct {
     uint32_t timestamp;
 } SensorData_t;
 
-typedef enum {
-    PAGE_TEMPERATURE = 0,
-    PAGE_HUMIDITY,
-    PAGE_LIGHT,
-    PAGE_MOTION,
-    PAGE_COUNT
-} DisplayPage_t;
+/*
+ * Event group bit assignments (Laboratory Activity Part X).
+ *
+ *   EVENT_MOTION_BIT       Producer: MotionTask. Consumer: StateTask.
+ *                          Set while PIR motion is present; StateTask waits on
+ *                          this bit (blocking) instead of polling.
+ *   EVENT_STATE_ACTIVE_BIT Producer: StateTask (from the state machine).
+ *                          Consumer: DisplayTask. Set = ACTIVE, clear = INACTIVE.
+ *   EVENT_ALARM_BIT        Producer: AlarmTask. Consumer: diagnostics.
+ */
+#define EVENT_MOTION_BIT        (1 << 0)
+#define EVENT_STATE_ACTIVE_BIT  (1 << 1)
+#define EVENT_ALARM_BIT         (1 << 2)
 
-typedef enum {
-    STATE_ACTIVE = 0,
-    STATE_INACTIVE
-} SystemState_t;
-
-typedef enum {
-    TEMP_LOW = 0,
-    TEMP_NORMAL,
-    TEMP_HIGH
-} TempStatus_t;
-
-#define MOTION_DETECTED_BIT   (1 << 0)
-#define ENCODER_CW_BIT        (1 << 1)
-#define ENCODER_CCW_BIT       (1 << 2)
-#define ENCODER_BTN_BIT       (1 << 3)
-
-#define TEMP_LOW_THRESHOLD    18.0f
-#define TEMP_HIGH_THRESHOLD   30.0f
-#define INACTIVE_TIMEOUT_MS   15000U
-#define SENSOR_READ_PERIOD_MS 1000U
-#define ALARM_CHECK_PERIOD_MS 500U
-#define DISPLAY_REFRESH_MS    100U
+#define INACTIVE_TIMEOUT_MS    15000U
+#define SENSOR_READ_PERIOD_MS  1000U
+#define ALARM_CHECK_PERIOD_MS  500U
+#define DISPLAY_REFRESH_MS     100U
+#define STATE_POLL_PERIOD_MS   250U
+#define MOTION_POLL_PERIOD_MS  500U
 
 void Error_Handler(void);
 

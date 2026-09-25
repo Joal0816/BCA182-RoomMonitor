@@ -1,6 +1,17 @@
 #include "sensor_task.h"
 #include <math.h>
 
+/*
+ * SensorTask (priority 2) - periodic acquisition of DHT22 + LDR.
+ *
+ * Uses vTaskDelayUntil() so that the 1 s sampling period is measured from the
+ * start of each cycle. This compensates for the (variable) time spent reading
+ * the sensors and prevents the period from drifting.
+ *
+ * The sample is published to two independent consumer queues. The alarm path
+ * and the display path therefore each receive every sample; they do not
+ * compete for the same queue items.
+ */
 void SensorTask(void *pvParameters) {
     SensorTaskParams_t *params = (SensorTaskParams_t *)pvParameters;
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -31,7 +42,8 @@ void SensorTask(void *pvParameters) {
         data.motion_detected = PIR_GetState(params->pir);
 
         if (read_ok) {
-            xQueueSend(params->sensor_queue, &data, 0);
+            xQueueSend(params->alarm_queue, &data, 0);
+            xQueueSend(params->display_queue, &data, 0);
         }
 
         UART_Mutex_Printf(params->uart_mutex,

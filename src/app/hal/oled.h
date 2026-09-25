@@ -13,6 +13,8 @@ typedef struct {
 } OLED_t;
 
 void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
+void OLED_DisplayOn(OLED_t *oled);
+void OLED_DisplayOff(OLED_t *oled);
 void OLED_Clear(OLED_t *oled);
 void OLED_Update(OLED_t *oled);
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color);

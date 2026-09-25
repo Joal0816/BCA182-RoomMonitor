@@ -4,13 +4,11 @@
 #include "main.h"
 #include "logic/alarm.h"
 #include "logic/temperature.h"
-#include "logic/state_machine.h"
 #include "drivers/uart_mutex.h"
 
 typedef struct {
-    QueueHandle_t sensor_queue;
+    QueueHandle_t alarm_queue;   /* SensorData_t from SensorTask */
     Alarm_t *alarm;
-    StateMachine_t *state_machine;
     UART_Mutex_t *uart_mutex;
 } AlarmTaskParams_t;
 

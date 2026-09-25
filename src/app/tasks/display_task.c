@@ -2,14 +2,21 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * DisplayTask (priority 1) - sole owner of the SSD1306 OLED.
+ *
+ * It blocks waiting for new sensor samples / page selections. While the
+ * system is INACTIVE the panel is switched off (see Part IX of the lab) and
+ * no rendering occurs; the state is read atomically from the event group.
+ */
+
 static void DrawHeader(OLED_t *oled, const char *title) {
     OLED_DrawRect(oled, 0, 0, OLED_WIDTH, 12, 1);
     OLED_DrawString(oled, 4, 3, title, 1);
 }
 
-static void DrawStatusBar(OLED_t *oled, SystemState_t state) {
-    const char *state_str = (state == STATE_ACTIVE) ? "ACTIVE" : "INACTIVE";
-    OLED_DrawString(oled, OLED_WIDTH - 48, 3, state_str, 1);
+static void DrawStatusBar(OLED_t *oled) {
+    OLED_DrawString(oled, OLED_WIDTH - 48, 3, "ACTIVE", 1);
 }
 
 static void DrawTemperaturePage(OLED_t *oled, SensorData_t *data) {
@@ -58,7 +65,12 @@ static void DrawMotionPage(OLED_t *oled, SensorData_t *data) {
 void DisplayTask(void *pvParameters) {
     DisplayTaskParams_t *params = (DisplayTaskParams_t *)pvParameters;
     SensorData_t data;
+    SensorData_t latest;
+    memset(&latest, 0, sizeof(latest));
+
     DisplayPage_t current_page = PAGE_TEMPERATURE;
+    uint8_t have_data = 0;
+    uint8_t blanked = 0;
 
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
@@ -69,33 +81,51 @@ void DisplayTask(void *pvParameters) {
     for (;;) {
         xQueueReceive(params->display_page_queue, &current_page, 0);
 
-        if (xQueueReceive(params->sensor_queue, &data, 0) == pdPASS) {
-            SystemState_t state = StateMachine_GetState(params->state_machine);
+        if (xQueueReceive(params->display_queue, &data, 0) == pdPASS) {
+            latest = data;
+            have_data = 1;
+        }
 
+        EventBits_t bits = xEventGroupGetBits(params->event_group);
+        uint8_t active = (bits & EVENT_STATE_ACTIVE_BIT) != 0;
+
+        if (!active) {
+            if (!blanked) {
+                OLED_Clear(params->oled);
+                OLED_Update(params->oled);
+                OLED_DisplayOff(params->oled);
+                blanked = 1;
+                UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED blanked (INACTIVE)\r\n");
+            }
+            vTaskDelay(pdMS_TO_TICKS(DISPLAY_REFRESH_MS));
+            continue;
+        }
+
+        if (blanked) {
+            OLED_DisplayOn(params->oled);
+            blanked = 0;
+            UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED restored (ACTIVE)\r\n");
+        }
+
+        if (have_data) {
             OLED_Clear(params->oled);
+            DrawStatusBar(params->oled);
 
-            if (state == STATE_ACTIVE) {
-                DrawStatusBar(params->oled, state);
-
-                switch (current_page) {
-                    case PAGE_TEMPERATURE:
-                        DrawTemperaturePage(params->oled, &data);
-                        break;
-                    case PAGE_HUMIDITY:
-                        DrawHumidityPage(params->oled, &data);
-                        break;
-                    case PAGE_LIGHT:
-                        DrawLightPage(params->oled, &data);
-                        break;
-                    case PAGE_MOTION:
-                        DrawMotionPage(params->oled, &data);
-                        break;
-                    default:
-                        break;
-                }
-            } else {
-                OLED_DrawString(params->oled, 10, 25, "SYSTEM", 2);
-                OLED_DrawString(params->oled, 10, 45, "INACTIVE", 2);
+            switch (current_page) {
+                case PAGE_TEMPERATURE:
+                    DrawTemperaturePage(params->oled, &latest);
+                    break;
+                case PAGE_HUMIDITY:
+                    DrawHumidityPage(params->oled, &latest);
+                    break;
+                case PAGE_LIGHT:
+                    DrawLightPage(params->oled, &latest);
+                    break;
+                case PAGE_MOTION:
+                    DrawMotionPage(params->oled, &latest);
+                    break;
+                default:
+                    break;
             }
 
             OLED_Update(params->oled);

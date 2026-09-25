@@ -7,8 +7,7 @@
 
 typedef struct {
     Encoder_t *encoder;
-    QueueHandle_t display_queue;
-    EventGroupHandle_t event_group;
+    QueueHandle_t display_queue;   /* DisplayPage_t -> DisplayTask */
     UART_Mutex_t *uart_mutex;
     TaskHandle_t task_handle;
 } InputTaskParams_t;

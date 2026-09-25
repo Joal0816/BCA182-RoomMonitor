@@ -21,6 +21,7 @@
 #include "app/tasks/sensor_task.h"
 #include "app/tasks/alarm_task.h"
 #include "app/tasks/display_task.h"
+#include "app/tasks/state_task.h"
 
 #include "drivers/uart_mutex.h"
 
@@ -45,7 +46,8 @@ static Alarm_t alarm;
 
 static UART_Mutex_t uart_mutex;
 
-static QueueHandle_t sensor_queue;
+static QueueHandle_t alarm_queue;
+static QueueHandle_t display_queue;
 static QueueHandle_t display_page_queue;
 static EventGroupHandle_t event_group;
 
@@ -54,13 +56,14 @@ static MotionTaskParams_t motion_task_params;
 static SensorTaskParams_t sensor_task_params;
 static AlarmTaskParams_t alarm_task_params;
 static DisplayTaskParams_t display_task_params;
+static StateTaskParams_t state_task_params;
 
 static I2C_HandleTypeDef hi2c1;
 static ADC_HandleTypeDef hadc1;
 static TIM_HandleTypeDef htim4;
 static UART_HandleTypeDef huart1;
 
-int main(void) {
+int app_main(void) {
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
@@ -76,17 +79,20 @@ int main(void) {
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
-    StateMachine_Init(&state_machine, INACTIVE_TIMEOUT_MS);
+    StateMachine_Init(&state_machine, INACTIVE_TIMEOUT_MS, 0);
     Alarm_Init(&alarm, &buzzer);
     UART_Mutex_Init(&uart_mutex, &huart1);
 
-    sensor_queue = xQueueCreate(5, sizeof(SensorData_t));
+    alarm_queue = xQueueCreate(5, sizeof(SensorData_t));
+    display_queue = xQueueCreate(5, sizeof(SensorData_t));
     display_page_queue = xQueueCreate(1, sizeof(DisplayPage_t));
     event_group = xEventGroupCreate();
 
+    /* The state machine boots ACTIVE; publish that to the event group. */
+    xEventGroupSetBits(event_group, EVENT_STATE_ACTIVE_BIT);
+
     input_task_params.encoder = &encoder;
     input_task_params.display_queue = display_page_queue;
-    input_task_params.event_group = event_group;
     input_task_params.uart_mutex = &uart_mutex;
 
     motion_task_params.pir = &pir;
@@ -96,24 +102,29 @@ int main(void) {
     sensor_task_params.dht22 = &dht22;
     sensor_task_params.ldr = &ldr;
     sensor_task_params.pir = &pir;
-    sensor_task_params.sensor_queue = sensor_queue;
+    sensor_task_params.alarm_queue = alarm_queue;
+    sensor_task_params.display_queue = display_queue;
     sensor_task_params.uart_mutex = &uart_mutex;
 
-    alarm_task_params.sensor_queue = sensor_queue;
+    alarm_task_params.alarm_queue = alarm_queue;
     alarm_task_params.alarm = &alarm;
-    alarm_task_params.state_machine = &state_machine;
     alarm_task_params.uart_mutex = &uart_mutex;
 
     display_task_params.oled = &oled;
-    display_task_params.sensor_queue = sensor_queue;
+    display_task_params.display_queue = display_queue;
     display_task_params.display_page_queue = display_page_queue;
-    display_task_params.state_machine = &state_machine;
+    display_task_params.event_group = event_group;
     display_task_params.uart_mutex = &uart_mutex;
+
+    state_task_params.state_machine = &state_machine;
+    state_task_params.event_group = event_group;
+    state_task_params.uart_mutex = &uart_mutex;
 
     xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
     xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3, &motion_task_params.task_handle);
     xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
     xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2, NULL);
+    xTaskCreate(StateTask, "StateTask", 256, &state_task_params, 2, NULL);
     xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
 
     UART_Mutex_Printf(&uart_mutex, "[MAIN] System initialized\r\n");
@@ -123,6 +134,14 @@ int main(void) {
 
     while (1) {
     }
+}
+
+/*
+ * Cortex-M startup code calls main(); the application entry point required by
+ * the laboratory activity is app_main().
+ */
+int main(void) {
+    return app_main();
 }
 
 static void SystemClock_Config(void) {
