@@ -71,10 +71,12 @@ void DisplayTask(void *pvParameters) {
     DisplayPage_t current_page = PAGE_TEMPERATURE;
     uint8_t have_data = 0;
     uint8_t blanked = 0;
+    TickType_t last_retry_log = 0;
 
     if (!params->oled->ready) {
         UART_Mutex_Printf(params->uart_mutex,
                           "[DISPLAY] OLED unavailable; retrying\r\n");
+        last_retry_log = xTaskGetTickCount();
     }
 
     if (params->oled->ready) {
@@ -91,12 +93,20 @@ void DisplayTask(void *pvParameters) {
 
     for (;;) {
         if (!params->oled->ready) {
+            EventBits_t retry_bits = xEventGroupGetBits(params->event_group);
+            uint8_t retry_active = (retry_bits & EVENT_STATE_ACTIVE_BIT) != 0;
             vTaskDelay(pdMS_TO_TICKS(500));
             if (OLED_Init(params->oled, params->oled->hi2c) == HAL_OK) {
-                blanked = 0;
-                have_data = 0;
+                blanked = retry_active ? 0 : 1;
                 UART_Mutex_Printf(params->uart_mutex,
                                   "[DISPLAY] OLED recovered\r\n");
+            } else {
+                TickType_t now = xTaskGetTickCount();
+                if ((now - last_retry_log) >= pdMS_TO_TICKS(5000)) {
+                    UART_Mutex_Printf(params->uart_mutex,
+                                      "[DISPLAY] OLED still unavailable; retrying\r\n");
+                    last_retry_log = now;
+                }
             }
             continue;
         }
