@@ -83,7 +83,9 @@ This project demonstrates the learning outcomes of BCA182 Laboratory Activity 1:
  └────────────┘
 ```
 
-The full rendered diagram is available as `docs/cover-image.png`.
+The diagram above is the task/deployment view. A rendered project cover image is
+available at `docs/cover-image.png`; a rendered state-machine figure and a
+task-communication figure are part of the laboratory report and this README.
 
 ---
 
