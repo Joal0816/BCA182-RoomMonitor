@@ -5,12 +5,14 @@
 #include "hal/dht22.h"
 #include "hal/ldr.h"
 #include "hal/pir.h"
+#include "hal/oled.h"
 #include "drivers/uart_mutex.h"
 
 typedef struct {
     DHT22_t *dht22;
     LDR_t *ldr;
     PIR_t *pir;
+    OLED_t *oled;
     QueueHandle_t alarm_queue;    /* SensorData_t -> AlarmTask   */
     QueueHandle_t display_queue;  /* SensorData_t -> DisplayTask */
     UART_Mutex_t *uart_mutex;

@@ -27,7 +27,7 @@ HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     HAL_Delay(100);
 
     for (uint8_t attempt = 0; attempt < 3; attempt++) {
-        if (HAL_I2C_IsDeviceReady(oled->hi2c, OLED_I2C_ADDR << 1, 1, 100) == HAL_OK) {
+        if (HAL_I2C_IsDeviceReady(oled->hi2c, OLED_I2C_ADDR << 1, 1, 20) == HAL_OK) {
             oled->ready = 1;
             break;
         }
@@ -57,16 +57,18 @@ HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     return HAL_OK;
 }
 
-void OLED_DisplayOn(OLED_t *oled) {
+HAL_StatusTypeDef OLED_DisplayOn(OLED_t *oled) {
     if (oled->ready) {
-        OLED_SendCommand(oled, 0xAF);
+        return OLED_SendCommand(oled, 0xAF);
     }
+    return HAL_ERROR;
 }
 
-void OLED_DisplayOff(OLED_t *oled) {
+HAL_StatusTypeDef OLED_DisplayOff(OLED_t *oled) {
     if (oled->ready) {
-        OLED_SendCommand(oled, 0xAE);
+        return OLED_SendCommand(oled, 0xAE);
     }
+    return HAL_ERROR;
 }
 
 void OLED_Clear(OLED_t *oled) {

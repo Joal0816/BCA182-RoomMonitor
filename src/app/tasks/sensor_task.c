@@ -47,7 +47,8 @@ void SensorTask(void *pvParameters) {
                 UART_Mutex_Printf(params->uart_mutex,
                                   "[SENSOR] Alarm queue full; sample dropped\r\n");
             }
-            if (xQueueSend(params->display_queue, &data,
+            if (params->oled->ready &&
+                xQueueSend(params->display_queue, &data,
                            pdMS_TO_TICKS(QUEUE_SEND_TIMEOUT_MS)) != pdPASS) {
                 UART_Mutex_Printf(params->uart_mutex,
                                   "[SENSOR] Display queue full; sample dropped\r\n");

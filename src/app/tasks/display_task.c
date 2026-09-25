@@ -81,7 +81,13 @@ void DisplayTask(void *pvParameters) {
 
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
-    OLED_Update(params->oled);
+    if (OLED_Update(params->oled) != HAL_OK) {
+        params->oled->ready = 0;
+        UART_Mutex_Printf(params->uart_mutex,
+                          "[DISPLAY] OLED update failed; display task stopped\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -99,8 +105,14 @@ void DisplayTask(void *pvParameters) {
         if (!active) {
             if (!blanked) {
                 OLED_Clear(params->oled);
-                OLED_Update(params->oled);
-                OLED_DisplayOff(params->oled);
+                if (OLED_Update(params->oled) != HAL_OK ||
+                    OLED_DisplayOff(params->oled) != HAL_OK) {
+                    params->oled->ready = 0;
+                    UART_Mutex_Printf(params->uart_mutex,
+                                      "[DISPLAY] OLED communication failed; display task stopped\r\n");
+                    vTaskDelete(NULL);
+                    return;
+                }
                 blanked = 1;
                 UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED blanked (INACTIVE)\r\n");
             }
@@ -109,7 +121,13 @@ void DisplayTask(void *pvParameters) {
         }
 
         if (blanked) {
-            OLED_DisplayOn(params->oled);
+            if (OLED_DisplayOn(params->oled) != HAL_OK) {
+                params->oled->ready = 0;
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[DISPLAY] OLED communication failed; display task stopped\r\n");
+                vTaskDelete(NULL);
+                return;
+            }
             blanked = 0;
             UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED restored (ACTIVE)\r\n");
         }
@@ -135,7 +153,13 @@ void DisplayTask(void *pvParameters) {
                     break;
             }
 
-            OLED_Update(params->oled);
+            if (OLED_Update(params->oled) != HAL_OK) {
+                params->oled->ready = 0;
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[DISPLAY] OLED update failed; display task stopped\r\n");
+                vTaskDelete(NULL);
+                return;
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(DISPLAY_REFRESH_MS));

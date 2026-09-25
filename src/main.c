@@ -85,7 +85,9 @@ int app_main(void) {
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
     if (OLED_Init(&oled, &hi2c1) != HAL_OK) {
-        HAL_UART_Transmit(&huart1, (uint8_t *)"[BOOT] OLED not detected\r\n", 26, 100);
+        static const char oled_error[] = "[BOOT] OLED not detected\r\n";
+        HAL_UART_Transmit(&huart1, (uint8_t *)oled_error,
+                          sizeof(oled_error) - 1, 100);
     }
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
@@ -113,6 +115,7 @@ int app_main(void) {
     sensor_task_params.dht22 = &dht22;
     sensor_task_params.ldr = &ldr;
     sensor_task_params.pir = &pir;
+    sensor_task_params.oled = &oled;
     sensor_task_params.alarm_queue = alarm_queue;
     sensor_task_params.display_queue = display_queue;
     sensor_task_params.uart_mutex = &uart_mutex;
