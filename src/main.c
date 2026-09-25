@@ -72,6 +72,15 @@ int app_main(void) {
     MX_TIM4_Init();
     MX_USART1_UART_Init();
 
+    /* Unconditional boot banner: proves the core is running and UART1 is
+     * transmitting before any other peripheral or the RTOS starts. */
+    {
+        static const char boot_banner[] =
+            "\r\n[BOOT] BCA182 Room Monitoring System starting...\r\n";
+        HAL_UART_Transmit(&huart1, (uint8_t *)boot_banner,
+                          sizeof(boot_banner) - 1, 100);
+    }
+
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
@@ -148,14 +157,31 @@ static void SystemClock_Config(void) {
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
+    /* Preferred: HSE 8 MHz crystal x 9 = 72 MHz. */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
     RCC_OscInitStruct.HSEState = RCC_HSE_ON;
     RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
     RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
     RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
+        /*
+         * Fallback for simulators/targets without a working external
+         * crystal: run from the internal HSI, PLL source = HSI/2 x 16 = 64 MHz.
+         * The baud rate stays correct because the UART derives it from the
+         * actual PCLK reported by the RCC.
+         */
+        RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+        RCC_OscInitStruct.HSEState = RCC_HSE_OFF;
+        RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+        RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+        RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+        RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
+        RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
+        if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+            Error_Handler();
+        }
     }
 
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK

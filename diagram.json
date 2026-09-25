@@ -11,7 +11,9 @@
       "id": "mcu",
       "top": 0,
       "left": 0,
-      "attrs": {}
+      "attrs": {
+        "builder": "platformio-stm32"
+      }
     },
     {
       "type": "wokwi-dht22",
