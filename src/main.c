@@ -84,7 +84,7 @@ int app_main(void) {
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
-    if (OLED_Init(&oled, &hi2c1) != HAL_OK) {
+    if (OLED_Init(&oled, &hi2c1, 1) != HAL_OK) {
         static const char oled_error[] = "[BOOT] OLED not detected\r\n";
         HAL_UART_Transmit(&huart1, (uint8_t *)oled_error,
                           sizeof(oled_error) - 1, 100);

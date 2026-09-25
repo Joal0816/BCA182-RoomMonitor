@@ -21,7 +21,7 @@ static HAL_StatusTypeDef OLED_SendData(OLED_t *oled, const uint8_t *data, uint16
                                    buffer, size + 1, 100);
 }
 
-HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
+HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c, uint8_t display_on) {
     oled->hi2c = hi2c;
     oled->ready = 0;
     HAL_Delay(100);
@@ -40,13 +40,17 @@ HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     static const uint8_t init_commands[] = {
         0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
         0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
-        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF
+        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6
     };
     for (uint8_t i = 0; i < sizeof(init_commands); i++) {
         if (OLED_SendCommand(oled, init_commands[i]) != HAL_OK) {
             oled->ready = 0;
             return HAL_ERROR;
         }
+    }
+    if (OLED_SendCommand(oled, display_on ? 0xAF : 0xAE) != HAL_OK) {
+        oled->ready = 0;
+        return HAL_ERROR;
     }
 
     OLED_Clear(oled);

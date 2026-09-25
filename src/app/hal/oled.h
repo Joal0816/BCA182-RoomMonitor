@@ -13,7 +13,7 @@ typedef struct {
     volatile uint8_t ready;
 } OLED_t;
 
-HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
+HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c, uint8_t display_on);
 HAL_StatusTypeDef OLED_DisplayOn(OLED_t *oled);
 HAL_StatusTypeDef OLED_DisplayOff(OLED_t *oled);
 void OLED_Clear(OLED_t *oled);
