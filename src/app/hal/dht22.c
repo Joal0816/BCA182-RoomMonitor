@@ -34,7 +34,7 @@ static void DHT22_Delay_us(uint32_t us) {
     }
 }
 
-static uint8_t DHT22_ComputeChecksum(uint8_t *data) {
+static uint8_t DHT22_ComputeChecksum(const uint8_t *data) {
     uint8_t crc = 0;
     for (int i = 0; i < 4; i++) {
         crc += data[i];

@@ -18,6 +18,6 @@ void Alarm_Init(Alarm_t *alarm, Buzzer_t *buzzer);
 void Alarm_Update(Alarm_t *alarm, TempStatus_t temp_status);
 void Alarm_Enable(Alarm_t *alarm);
 void Alarm_Disable(Alarm_t *alarm);
-uint8_t Alarm_IsActive(Alarm_t *alarm);
+uint8_t Alarm_IsActive(const Alarm_t *alarm);
 
 #endif /* ALARM_H */

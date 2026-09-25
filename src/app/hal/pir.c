@@ -16,7 +16,7 @@ void PIR_Init(PIR_t *pir, GPIO_TypeDef *port, uint16_t pin) {
     HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
-uint8_t PIR_GetState(PIR_t *pir) {
+uint8_t PIR_GetState(const PIR_t *pir) {
     return pir->motion_detected;
 }
 

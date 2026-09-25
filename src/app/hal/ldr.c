@@ -23,6 +23,6 @@ uint8_t LDR_Read(LDR_t *ldr) {
     return LDR_ERROR;
 }
 
-uint16_t LDR_GetValue(LDR_t *ldr) {
+uint16_t LDR_GetValue(const LDR_t *ldr) {
     return ldr->last_value;
 }

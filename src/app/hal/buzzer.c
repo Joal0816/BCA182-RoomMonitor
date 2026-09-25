@@ -57,6 +57,6 @@ void Buzzer_Toggle(Buzzer_t *buzzer) {
     }
 }
 
-uint8_t Buzzer_IsPlaying(Buzzer_t *buzzer) {
+uint8_t Buzzer_IsPlaying(const Buzzer_t *buzzer) {
     return buzzer->playing;
 }

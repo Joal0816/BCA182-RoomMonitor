@@ -11,7 +11,7 @@ typedef struct {
 } PIR_t;
 
 void PIR_Init(PIR_t *pir, GPIO_TypeDef *port, uint16_t pin);
-uint8_t PIR_GetState(PIR_t *pir);
+uint8_t PIR_GetState(const PIR_t *pir);
 void PIR_EXTI_Callback(PIR_t *pir);
 
 #endif /* PIR_H */

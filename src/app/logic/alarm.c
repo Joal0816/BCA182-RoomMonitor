@@ -59,6 +59,6 @@ void Alarm_Disable(Alarm_t *alarm) {
     alarm->alarm_active = 0;
 }
 
-uint8_t Alarm_IsActive(Alarm_t *alarm) {
+uint8_t Alarm_IsActive(const Alarm_t *alarm) {
     return alarm->alarm_active;
 }

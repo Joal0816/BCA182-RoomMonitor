@@ -14,6 +14,6 @@ typedef struct {
 
 void LDR_Init(LDR_t *ldr, ADC_HandleTypeDef *hadc, uint32_t channel);
 uint8_t LDR_Read(LDR_t *ldr);
-uint16_t LDR_GetValue(LDR_t *ldr);
+uint16_t LDR_GetValue(const LDR_t *ldr);
 
 #endif /* LDR_H */
