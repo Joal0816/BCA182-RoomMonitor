@@ -54,7 +54,7 @@ HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c, uint8_t displ
     }
 
     OLED_Clear(oled);
-    if (OLED_Update(oled) != HAL_OK) {
+    if (display_on && OLED_Update(oled) != HAL_OK) {
         oled->ready = 0;
         return HAL_ERROR;
     }
