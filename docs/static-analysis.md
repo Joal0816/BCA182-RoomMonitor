@@ -12,7 +12,7 @@
 |----------|-------|
 | HIGH | 0 |
 | MEDIUM | 0 |
-| LOW | 55 |
+| LOW | 76 |
 
 `pio check` reports **no functional defects**. All findings are LOW-severity
 style observations.
@@ -21,12 +21,12 @@ style observations.
 
 | Component | HIGH | MEDIUM | LOW |
 |-----------|------|--------|-----|
-| `src` | 0 | 0 | 7 |
+| `src` | 0 | 0 | 28 |
 | `src/app/hal` | 0 | 0 | 24 |
 | `src/app/logic` | 0 | 0 | 15 |
 | `src/app/tasks` | 0 | 0 | 6 |
 | `src/drivers` | 0 | 0 | 3 |
-| **Total** | **0** | **0** | **55** |
+| **Total** | **0** | **0** | **76** |
 
 ---
 
@@ -49,6 +49,7 @@ Example findings:
 | `src/app/logic/temperature.c` | `EvaluateTemperature` | Called from `alarm_task.c` and `display_task.c` |
 | `src/main.c` | `EXTI0_IRQHandler`, `SysTick_Handler` | Referenced by the vector table |
 | `src/main.c` | `vApplicationStackOverflowHook` | Referenced by the FreeRTOS kernel |
+| `src/stm32f1xx_hal_msp.c` | `HAL_MspInit`, `HAL_*_MspInit` | Weak HAL callbacks invoked by `HAL_Init` / peripheral init |
 
 **Interpretation:** these are analyser limitations, not dead code. The build
 links successfully and the functions are reachable (task creation uses function
@@ -73,7 +74,7 @@ not affect behaviour.
 
 | Category | Action | Status |
 |----------|--------|--------|
-| `unusedFunction` (54) | No code change — verified reachable; documented as analyser limitation | Accepted |
+| `unusedFunction` (75) | No code change — verified reachable; documented as analyser limitation | Accepted |
 | `constParameterPointer` (1) | Apply `const` to remaining read-only accessor (`Encoder_IsButtonPressed`) | Planned |
 
 No HIGH or MEDIUM findings required remediation. The analysis confirms there are

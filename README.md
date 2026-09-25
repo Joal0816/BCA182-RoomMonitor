@@ -162,6 +162,11 @@ uncontrolled busy loop.
 | USART1 TX/RX | PA9 / PA10 | USART1 (115200 8N1) |
 | Status LED | PC13 | GPIO |
 
+> Peripheral clocks and GPIO alternate functions are set up by the STM32Cube MSP
+> callbacks in `src/stm32f1xx_hal_msp.c`. In `diagram.json`, Wokwi refers to the
+> same pins with short labels (`A1`, `B6`, `B7`, `B8`, `A9`, `A10`) and the power
+> rails `3V3.1`, `5V.1` and `GND.1`.
+
 ---
 
 ## Task Design

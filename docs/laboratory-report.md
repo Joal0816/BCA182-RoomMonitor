@@ -48,6 +48,11 @@ SSD1306 OLED, a KY-040 rotary encoder and a buzzer. `wokwi.toml` loads the ELF
 produced by `pio run -e bluepill_f103c8`, so the firmware under simulation is the
 real STM32Cube/FreeRTOS build (not an Arduino sketch).
 
+`diagram.json` wires the peripherals using the Blue Pill's Wokwi pin labels —
+short designators such as `A0`, `A1`, `B6`, `B7`, `B8`, `A9`, `A10` and the power
+rails `3V3.1`, `5V.1`, `GND.1`. The pin table in Section 2.1 lists the equivalent
+STM32 port/pin names (`PA0`, `PB6`, …) used by the firmware.
+
 ---
 
 ## 2. System Architecture and Design
@@ -78,6 +83,13 @@ The firmware separates three concerns:
 `main()` follows the STM32 startup convention and delegates to `app_main()`, the
 application entry point required by the activity. `app_main()` initializes the
 HAL, creates the RTOS objects and tasks, and starts the scheduler.
+
+Peripheral clocks and GPIO alternate functions are configured in
+`src/stm32f1xx_hal_msp.c` through the STM32Cube MSP callbacks
+(`HAL_UART_MspInit`, `HAL_I2C_MspInit`, `HAL_ADC_MspInit`, `HAL_TIM_PWM_MspInit`).
+These callbacks enable `USART1`, `I2C1`, `ADC1` and `TIM4` and map `PA9/PA10`,
+`PB6/PB7`, `PA0` and `PB8`; without them the HAL would access unclocked
+peripherals and produce no UART output.
 
 ### 2.3 Subsystem decomposition
 
@@ -240,7 +252,7 @@ Three faults were injected and reverted, as required (details in
 
 ## 6. Static Code Analysis
 
-`pio check -e bluepill_f103c8` reports **0 HIGH, 0 MEDIUM and 55 LOW** findings.
+`pio check -e bluepill_f103c8` reports **0 HIGH, 0 MEDIUM and 76 LOW** findings.
 
 | Category | Count | Interpretation |
 |----------|-------|----------------|
