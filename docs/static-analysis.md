@@ -12,7 +12,7 @@
 |----------|-------|
 | HIGH | 0 |
 | MEDIUM | 0 |
-| LOW | 76 |
+| LOW | 75 (after remediation; 76 initially) |
 
 `pio check` reports **no functional defects**. All findings are LOW-severity
 style observations.
@@ -26,7 +26,7 @@ style observations.
 | `src/app/logic` | 0 | 0 | 15 |
 | `src/app/tasks` | 0 | 0 | 6 |
 | `src/drivers` | 0 | 0 | 3 |
-| **Total** | **0** | **0** | **76** |
+| **Total** | **0** | **0** | **75** |
 
 ---
 
@@ -59,14 +59,16 @@ pointers, which the per-file analyser cannot follow).
 
 | File | Function | Status |
 |------|----------|--------|
-| `src/app/hal/encoder.c` | `Encoder_IsButtonPressed` | Remaining — could take `const Encoder_t *` |
+| `src/app/hal/encoder.c` | `Encoder_IsButtonPressed` | Corrected — now takes `const Encoder_t *` |
 
 The read-only accessors `DHT22_ComputeChecksum`, `LDR_GetValue`, `PIR_GetState`,
 `Buzzer_IsPlaying`, `Alarm_IsActive` and `UART_Mutex_Send` were corrected to take
-`const` parameters during this review; one suggestion remains.
+`const` parameters during this review.
 
-**Interpretation:** an optional readability/const-correctness suggestion that does
-not affect behaviour.
+**Interpretation:** an optional readability/const-correctness suggestion that
+does not affect behaviour. The remaining MSP callback suggestions cannot be
+applied because their signatures are defined by the STM32Cube HAL callback
+interface and must remain compatible with those declarations.
 
 ---
 
@@ -74,8 +76,8 @@ not affect behaviour.
 
 | Category | Action | Status |
 |----------|--------|--------|
-| `unusedFunction` (75) | No code change — verified reachable; documented as analyser limitation | Accepted |
-| `constParameterPointer` (1) | Apply `const` to remaining read-only accessor (`Encoder_IsButtonPressed`) | Planned |
+| `unusedFunction` (65) | No code change — verified reachable or intentionally exported API; documented as analyser limitation | Accepted |
+| `constParameterPointer` (11 initially; 10 remaining) | Apply `const` to `Encoder_IsButtonPressed`; retain HAL callback signatures | Completed |
 
 No HIGH or MEDIUM findings required remediation. The analysis confirms there are
 no detected correctness or safety defects in the firmware.

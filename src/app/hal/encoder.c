@@ -50,7 +50,7 @@ int8_t Encoder_GetDelta(Encoder_t *enc) {
     return delta;
 }
 
-uint8_t Encoder_IsButtonPressed(Encoder_t *enc) {
+uint8_t Encoder_IsButtonPressed(const Encoder_t *enc) {
     return enc->button_pressed;
 }
 

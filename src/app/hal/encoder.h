@@ -20,7 +20,7 @@ void Encoder_Init(Encoder_t *enc,
                   GPIO_TypeDef *dt_port, uint16_t dt_pin,
                   GPIO_TypeDef *sw_port, uint16_t sw_pin);
 int8_t Encoder_GetDelta(Encoder_t *enc);
-uint8_t Encoder_IsButtonPressed(Encoder_t *enc);
+uint8_t Encoder_IsButtonPressed(const Encoder_t *enc);
 void Encoder_ClearButton(Encoder_t *enc);
 void Encoder_CLK_EXTI_Callback(Encoder_t *enc);
 
