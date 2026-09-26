@@ -73,6 +73,8 @@ void DisplayTask(void *pvParameters) {
     uint8_t blanked = 0;
     TickType_t last_retry_log = 0;
 
+    UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] Task started\r\n");
+
     if (!params->oled->ready) {
         UART_Mutex_Printf(params->uart_mutex,
                           "[DISPLAY] OLED unavailable; retrying\r\n");

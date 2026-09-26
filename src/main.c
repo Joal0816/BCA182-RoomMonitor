@@ -102,6 +102,14 @@ int app_main(void) {
     display_queue = xQueueCreate(5, sizeof(SensorData_t));
     display_page_queue = xQueueCreate(1, sizeof(DisplayPage_t));
     event_group = xEventGroupCreate();
+    if (alarm_queue == NULL || display_queue == NULL ||
+        display_page_queue == NULL || event_group == NULL ||
+        uart_mutex.mutex == NULL) {
+        static const char rtos_error[] = "[FATAL] RTOS object allocation failed\r\n";
+        HAL_UART_Transmit(&huart1, (uint8_t *)rtos_error,
+                          sizeof(rtos_error) - 1, 100);
+        Error_Handler();
+    }
 
     /* The state machine boots ACTIVE; publish that to the event group. */
     xEventGroupSetBits(event_group, EVENT_STATE_ACTIVE_BIT);
@@ -136,12 +144,23 @@ int app_main(void) {
     state_task_params.event_group = event_group;
     state_task_params.uart_mutex = &uart_mutex;
 
-    xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
-    xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3, &motion_task_params.task_handle);
-    xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
-    xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2, NULL);
-    xTaskCreate(StateTask, "StateTask", 256, &state_task_params, 2, NULL);
-    xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
+    if (xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3,
+                    &input_task_params.task_handle) != pdPASS ||
+        xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3,
+                    &motion_task_params.task_handle) != pdPASS ||
+        xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2,
+                    NULL) != pdPASS ||
+        xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2,
+                    NULL) != pdPASS ||
+        xTaskCreate(StateTask, "StateTask", 256, &state_task_params, 2,
+                    NULL) != pdPASS ||
+        xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1,
+                    NULL) != pdPASS) {
+        static const char task_error[] = "[FATAL] Task allocation failed\r\n";
+        HAL_UART_Transmit(&huart1, (uint8_t *)task_error,
+                          sizeof(task_error) - 1, 100);
+        Error_Handler();
+    }
 
     UART_Mutex_Printf(&uart_mutex, "[MAIN] System initialized\r\n");
     UART_Mutex_Printf(&uart_mutex, "[MAIN] Starting FreeRTOS scheduler\r\n");
