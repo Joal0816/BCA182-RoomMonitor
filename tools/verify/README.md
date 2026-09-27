@@ -31,6 +31,8 @@ compile without a system libc.
 ## Usage
 
 ```bash
+./tools/verify/run_all.sh              # every pass below, in one command
+
 ./tools/verify/run_tests.sh            # 33 native unit tests
 ./tools/verify/run_static_analysis.sh  # clang --analyze, clang-tidy, -Wall -Wextra
 ./tools/verify/run_size_analysis.sh    # ARM object sizes + linked ELF estimate
