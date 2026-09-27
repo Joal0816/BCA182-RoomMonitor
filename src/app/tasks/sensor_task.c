@@ -3,8 +3,23 @@
 
 void SensorTask(void *pvParameters) {
     SensorTaskParams_t *params = (SensorTaskParams_t *)pvParameters;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xPeriod = pdMS_TO_TICKS(SENSOR_READ_PERIOD_MS);
+
+    /* Printed before the settle delay, so the log shows whether the task was
+       even scheduled during the first second of the run. */
+    UART_Mutex_Printf(params->uart_mutex, "[TASK] SensorTask entered\r\n");
+
+    /* DHT22_Init hands the sensor's ~1 s power-up settling time to this task
+       so boot is not blocked.  Waiting here means the first read happens on a
+       settled sensor, rather than failing at t=0 and leaving both queues
+       empty until the next period. */
+    vTaskDelay(pdMS_TO_TICKS(SENSOR_SETTLE_MS));
+
+    /* Taken after the settle delay.  xLastWakeTime must not be a full period
+       stale, or vTaskDelayUntil() finds its deadline already passed on the
+       first iteration and returns immediately -- issuing two reads back to
+       back instead of one per period. */
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for (;;) {
         SensorData_t data;

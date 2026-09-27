@@ -67,31 +67,227 @@
         "mode": "smooth",
         "volume": "0.8"
       }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "led_r",
+      "top": 430,
+      "left": 380,
+      "attrs": {
+        "resistance": "330"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led",
+      "top": 430,
+      "left": 500,
+      "attrs": {
+        "color": "red"
+      }
     }
   ],
   "connections": [
-    ["mcu:3V3.1", "dht22:VCC", "red", ["v-30"]],
-    ["mcu:GND.1", "dht22:GND", "black", ["v-30"]],
-    ["mcu:A1", "dht22:SDA", "green", ["v-20"]],
-    ["mcu:3V3.1", "ldr:VCC", "red", ["v-40"]],
-    ["mcu:GND.1", "ldr:GND", "black", ["v-40"]],
-    ["mcu:A0", "ldr:AO", "orange", ["v-50"]],
-    ["mcu:5V.1", "pir:VCC", "red", ["v-60"]],
-    ["mcu:GND.1", "pir:GND", "black", ["v-60"]],
-    ["mcu:B0", "pir:OUT", "purple", ["v-70"]],
-    ["mcu:3V3.1", "oled:VCC", "red", ["v0"]],
-    ["mcu:GND.1", "oled:GND", "black", ["v0"]],
-    ["mcu:B6", "oled:SCL", "blue", ["v0"]],
-    ["mcu:B7", "oled:SDA", "magenta", ["v0"]],
-    ["mcu:3V3.1", "encoder:VCC", "red", ["v60"]],
-    ["mcu:GND.1", "encoder:GND", "black", ["v60"]],
-    ["mcu:A2", "encoder:CLK", "cyan", ["v40"]],
-    ["mcu:A3", "encoder:DT", "yellow", ["v40"]],
-    ["mcu:A4", "encoder:SW", "white", ["v40"]],
-    ["mcu:B8", "buzzer:2", "red", ["v70"]],
-    ["mcu:GND.1", "buzzer:1", "black", ["v70"]],
-    ["mcu:A9", "$serialMonitor:RX", "red", ["v0"]],
-    ["mcu:A10", "$serialMonitor:TX", "blue", ["v0"]]
+    [
+      "mcu:3V3.1",
+      "dht22:VCC",
+      "red",
+      [
+        "v-30"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "dht22:GND",
+      "black",
+      [
+        "v-30"
+      ]
+    ],
+    [
+      "mcu:A1",
+      "dht22:SDA",
+      "green",
+      [
+        "v-20"
+      ]
+    ],
+    [
+      "mcu:3V3.1",
+      "ldr:VCC",
+      "red",
+      [
+        "v-40"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "ldr:GND",
+      "black",
+      [
+        "v-40"
+      ]
+    ],
+    [
+      "mcu:A0",
+      "ldr:AO",
+      "orange",
+      [
+        "v-50"
+      ]
+    ],
+    [
+      "mcu:5V.1",
+      "pir:VCC",
+      "red",
+      [
+        "v-60"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "pir:GND",
+      "black",
+      [
+        "v-60"
+      ]
+    ],
+    [
+      "mcu:B0",
+      "pir:OUT",
+      "purple",
+      [
+        "v-70"
+      ]
+    ],
+    [
+      "mcu:3V3.1",
+      "oled:VCC",
+      "red",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "oled:GND",
+      "black",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:B6",
+      "oled:SCL",
+      "blue",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:B7",
+      "oled:SDA",
+      "magenta",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:3V3.1",
+      "encoder:VCC",
+      "red",
+      [
+        "v60"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "encoder:GND",
+      "black",
+      [
+        "v60"
+      ]
+    ],
+    [
+      "mcu:A2",
+      "encoder:CLK",
+      "cyan",
+      [
+        "v40"
+      ]
+    ],
+    [
+      "mcu:A3",
+      "encoder:DT",
+      "yellow",
+      [
+        "v40"
+      ]
+    ],
+    [
+      "mcu:A4",
+      "encoder:SW",
+      "white",
+      [
+        "v40"
+      ]
+    ],
+    [
+      "mcu:B8",
+      "buzzer:2",
+      "red",
+      [
+        "v70"
+      ]
+    ],
+    [
+      "mcu:GND.1",
+      "buzzer:1",
+      "black",
+      [
+        "v70"
+      ]
+    ],
+    [
+      "mcu:A9",
+      "$serialMonitor:RX",
+      "red",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:A10",
+      "$serialMonitor:TX",
+      "blue",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "mcu:3V3.1",
+      "led_r:1",
+      "red",
+      [
+        "v90"
+      ]
+    ],
+    [
+      "led_r:2",
+      "led:A",
+      "orange",
+      [
+        "v90"
+      ]
+    ],
+    [
+      "led:C",
+      "mcu:C13",
+      "yellow",
+      [
+        "v90"
+      ]
+    ]
   ],
   "dependencies": {}
 }

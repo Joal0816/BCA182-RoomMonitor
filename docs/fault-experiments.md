@@ -13,9 +13,21 @@ buzzer, encoder response). The fault is then reverted and the baseline re-confir
 derived mechanically from the scheduler configuration in `src/FreeRTOSConfig.h`, the
 task priorities in `src/main.c`, and the blocking structure of each task — that is,
 they are deterministic consequences of the configuration, not measurements. The
-*Observed* sections record the run. Where a predicted outcome is a direct corollary of
-the configuration (for example, "a priority-3 task cannot be starved by a priority-2
-task"), it holds regardless of the run.
+*What Happened* sections describe the mechanism that the configuration forces. Where a
+predicted outcome is a direct corollary of the configuration (for example, "a priority-3
+task cannot be starved by a priority-2 task"), it holds regardless of any particular run.
+
+> **Scope of the observations.** These experiments are analysed, not re-measured. The
+> *What Happened* sections state what the configuration implies, and they were reasoned
+> through against the scheduler rules and checked against the source; they are not
+> recordings from a logged session on the current revision. Any statement below about
+> what was *seen* — a display updating, a buzzer sounding, a value on screen — is a
+> development-time note and must not be read as a reproducible result. Two findings in
+> particular bound what could ever have been observed: the decimal values in
+> Experiment 1 needed `-Wl,-u,_printf_float` (see L-06 in
+> [`limitations.md`](limitations.md)), and no run could produce any task output at all
+> before the FreeRTOS port patch (see L-07). See
+> [`functional-verification.md`](functional-verification.md) for the same distinction.
 
 Two settings govern every outcome below:
 
@@ -120,7 +132,7 @@ xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 4, NULL);
 
 4. **Alarm response delayed.** Temperature evaluation in AlarmTask was delayed because DisplayTask (now higher priority) preempted AlarmTask (priority 2).
 
-5. **Display remained responsive.** The OLED updated smoothly at 10 Hz with no visible artifacts, but at the expense of sensor reliability.
+5. **Display remained responsive.** The OLED refresh stayed on schedule at 10 Hz because the renderer now outranks everything that could delay it — at the expense of sensor reliability.
 
 ### Why It Happened
 

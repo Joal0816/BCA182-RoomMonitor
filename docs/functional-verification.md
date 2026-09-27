@@ -4,11 +4,21 @@
 **Platform:** STM32F103C8T6 (Blue Pill)  
 **Test Environment:** Wokwi simulation with UART serial monitor
 
-> **Evidence basis:** these tests were executed during development against a Wokwi
+> **Evidence basis.** These tests were executed during development against a Wokwi
 > simulation. Wokwi is not installed in the environment used to audit this document, so
 > the runs could not be replayed. Each *Actual Result* below is a development-time
 > observation; the *Expected Result* column has been checked line-by-line against the
 > source, and each is derivable from the code cited in the procedure.
+>
+> **How to read the `Status` column.** `PASS` records the developer's verdict at the time
+> of the run. It is not a re-measured result, and for this revision it cannot be one: the
+> simulator defects documented in [limitations.md](limitations.md) mean that a Wokwi run of
+> an unpatched build could not have produced a scheduler, an OLED update, or a decimal
+> sensor value at all (L-07, L-09, and the integer-only `printf` noted in §7.1 of the
+> report). The `Expected Result` column is what an examiner should hold the design to, and
+> it stands on its own; the `Actual Result` column is a record of what was claimed, and it
+> should be re-run before it is relied upon. Nothing in the table was verified on physical
+> hardware.
 
 ---
 
@@ -24,7 +34,7 @@
 | FT-06 | Temperature alarm activation | Temperature above threshold triggers buzzer alarm | Buzzer starts when temperature > 30 °C; alarm state shown on OLED | PASS |
 | FT-07 | Temperature alarm deactivation | Temperature below threshold clears buzzer alarm | Buzzer deactivates when temperature returns within the 18–30 °C band | PASS |
 | FT-08 | State machine: ACTIVATE on motion | A PIR trigger returns the system to ACTIVE and refreshes the OLED | System went ACTIVE on PIR trigger; OLED refreshed | PASS |
-| FT-09 | State machine: inactivity timeout | 15 s with no PIR trigger moves the system to INACTIVE and blanks the OLED | After 15 s the OLED showed `SYSTEM INACTIVE` | PASS |
+| FT-09 | State machine: inactivity timeout | 15 s with no PIR trigger moves the system to INACTIVE and the OLED shows `SYSTEM` / `INACTIVE` | After 15 s the OLED showed `SYSTEM INACTIVE` | PASS |
 | FT-10 | Concurrent task operation | All tasks run simultaneously without deadlock or starvation | System ran continuously for 60 minutes; all tasks kept producing output | PASS |
 
 ---
@@ -41,12 +51,38 @@
 3. Open the serial terminal (115200 baud) and confirm the startup messages.
 
 **Expected Result:** `DisplayTask` renders `Initializing...`, waits 1 s, then renders Page 0
-(`TEMPERATURE`). Serial shows `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler`.
-`PC13` remains off in normal operation — it is only toggled inside
+(`TEMPERATURE`). Serial shows `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler`,
+followed by a `[TASK] <name> entered` banner from each of the five task entry points.
+The LED on `PC13` remains off in normal operation — it is only toggled inside
 `vApplicationStackOverflowHook()` and `vApplicationMallocFailedHook()` as a fatal-error
-indicator, so a blinking LED means a fault, not a heartbeat.
+indicator, so a lit or blinking LED means a fault, not a heartbeat. The LED is wired
+active-low to match the physical Blue Pill (3.3 V → 330 Ω → anode → cathode → `PC13`), so
+`GPIO_PIN_SET` — the state `MX_GPIO_Init()` writes to `PC13` at boot — holds it off.
+No `[OLED]` error line appears: `OLED_Init()` returns `HAL_OK` only if the panel
+acknowledges every command in the init sequence, and `main.c` prints
+`[OLED] init failed: no ACK from 0x3C` otherwise. A blank display accompanied by that line
+means the panel is absent or mis-addressed; a blank display *without* it means the panel is
+present and the fault is elsewhere.
 
 **Actual Result:** All tasks started within 100 ms of power-on. OLED displayed Page 0. PC13 LED remained off. PASS.
+
+> **Revision note.** The `PC13` LED was not present in `diagram.json` when this test was
+> originally recorded, so the LED observation above could not have been made at that time.
+> It was added later, and its polarity had to be corrected when it was: the first version
+> wired it active-high (`PC13` → resistor → anode → GND), which is the reverse of the
+> physical Blue Pill and would have lit the simulated LED during normal operation, since
+> `MX_GPIO_Init()` drives `PC13` high at boot. The wiring is now active-low, matching both
+> the real board and the expected result above.
+>
+> The `[OLED]` error line was added after this test was recorded, so the original run could
+> not have exercised it. It is a diagnostic addition, not a change to the pass condition:
+> the test still passes on the same observable behaviour, and the new line only makes a
+> failure legible when it occurs.
+> An LED with a series resistor has since been added to the circuit on `PC13`, which makes
+> the claim testable. The task-startup and OLED observations are unaffected. See
+> section 7.5 of [docs/laboratory-report.md](laboratory-report.md) for the instrumentation
+> that was added, and Challenge 4 in section 7.3 for the port defect that had to be fixed
+> before any task could start at all.
 
 ---
 
@@ -218,7 +254,7 @@ refreshing. The blocking behaviour that could produce starvation is bounded: the
 critical section is the DHT22 read at ~20 ms (see `docs/limitations.md`), and no task
 holds the UART mutex indefinitely (`xSemaphoreTake` uses a 100 ms timeout).
 
-**Actual Result:** System ran for 60 minutes. All tasks continued to produce output. No deadlocks or hangs observed. PASS.
+**Actual Result:** The system was left running for an extended session and all tasks continued to produce output. No deadlock or hang was observed. Because this observation predates the FreeRTOS port patch (L-07), it cannot establish that the *current* revision sustains a 60-minute run; that remains to be re-run.
 
 ---
 
@@ -234,15 +270,15 @@ holds the UART mutex indefinitely (`xSemaphoreTake` uses a 100 ms timeout).
 | IDE | PlatformIO with arm-none-eabi-gcc | N/A |
 | Serial Monitor | 115200 baud, 8N1 | Full ($serialMonitor) |
 
-> **Wokwi Simulation Note:** Both UART serial monitoring (via `$serialMonitor` connection to PA9) and SSD1306 OLED rendering (via single-transaction bulk frame buffer transfer) are operational in the Wokwi simulation. Complete logic is additionally verified via 33 automated native unit tests. See [docs/limitations.md](limitations.md) for details.
+> **Wokwi Simulation Note:** UART serial monitoring is wired via `$serialMonitor` on PA9 and the SSD1306 OLED is wired on I2C1 (PB6/PB7). Both connections use the short header pin labels that Wokwi recognises; long-form labels such as `mcu:PA9` are silently discarded by the simulator, which is the defect recorded as L-05 in [docs/limitations.md](limitations.md). The simulator's Cortex-M3 model deviates from ARMv7-M in ways that affect the FreeRTOS port — most importantly, its `cpsie` instruction sets the interrupt masks instead of clearing them, which prevented the first task from ever starting until the port was patched. See Challenge 4 in section 7.3 of [docs/laboratory-report.md](laboratory-report.md). Complete logic is additionally verified via 33 automated native unit tests, which run on the host and are unaffected by simulator behaviour.
 
 ---
 
 ## Conclusion
 
-All 10 functional tests pass. The system demonstrates correct behavior across all specified requirements, including sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation.
+The ten functional tests cover sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation. Their expected outcomes were verified against the source; the Wokwi runs themselves were recorded during development and were not replayed during the audit that produced this revision — see the Wokwi Simulation Note above and L-05 to L-09 in [docs/limitations.md](limitations.md).
 
 **Verification methods:**
-- Wokwi simulation: full circuit simulation with OLED rendering and UART terminal monitoring
-- Native unit tests: 33 automated tests (all passing)
-- Hardware validation: Physical STM32 Blue Pill board compatible
+- Wokwi simulation: full circuit simulation with OLED rendering and UART terminal monitoring (development-time observations; Wokwi's Cortex-M3 model deviates from ARMv7-M — see L-07/L-08)
+- Native unit tests: 33 automated tests (re-run during this audit; all passing)
+- Hardware validation: Physical STM32 Blue Pill board compatible; not exercised during this work

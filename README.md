@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-A real-time environmental monitoring system built on the **STM32 Blue Pill** using **FreeRTOS** and **PlatformIO**. The system monitors temperature, humidity, ambient light, and motion, displaying data on an SSD1306 OLED display with rotary encoder navigation. It features a power-saving state machine that blanks the display when no motion is detected.
+A real-time environmental monitoring system built on the **STM32 Blue Pill** using **FreeRTOS** and **PlatformIO**. The system monitors temperature, humidity, ambient light, and motion, displaying data on an SSD1306 OLED display with rotary encoder navigation. It features an ACTIVE/INACTIVE state machine: when no motion is detected the display replaces the sensor pages with a `SYSTEM INACTIVE` notice, so an empty room costs no I²C traffic for sensor rendering.
 
 **Repository:** [github.com/Joal0816/BCA182-RoomMonitor](https://github.com/Joal0816/BCA182-RoomMonitor)
 
@@ -127,9 +127,9 @@ This laboratory demonstrates:
                     ┌──────────────┐
           ┌────────►│    ACTIVE    │◄────────┐
           │         │              │         │
-          │         │ OLED ON      │         │
-          │         │ Sensors ON   │         │
-          │         │ Alarm ON     │         │
+          │         │ Sensor page  │         │
+          │         │ drawn        │         │
+          │         │ Alarm active │         │
           │         └──────┬───────┘         │
           │                │                 │
           │     15s no motion                │
@@ -138,12 +138,16 @@ This laboratory demonstrates:
           │         ┌──────────────┐         │
           │         │   INACTIVE   │         │
           │         │              │         │
-          │         │ OLED OFF     │  PIR triggered
-          │         │ Reduced ops  │─────────┘
+          │         │ "SYSTEM      │  PIR triggered
+          │         │  INACTIVE"   │─────────┘
+          │         │ drawn        │
           │         └──────────────┘
           │
           └─────────── Any PIR trigger
 ```
+
+INACTIVE changes what the OLED renders; it suspends nothing. Every task keeps running at
+its normal rate and priority, sampling and alarming exactly as it does in ACTIVE.
 
 ---
 
@@ -229,9 +233,11 @@ pio check
 
 ## Running the Wokwi Simulation
 
-The project is fully simulated in Wokwi with working peripherals, including USART1 serial output (via `$serialMonitor`) and the SSD1306 OLED display (via bulk I2C buffer transmission).
+The project is simulated in Wokwi with all peripherals wired, including USART1 serial output (via `$serialMonitor`) and the SSD1306 OLED display (via bulk I2C buffer transmission).
 
-The schematic below is generated directly from `diagram.json` and shows all 7 components and 22 connections as they are wired in the simulator.
+> **Status:** the simulation was used throughout development to iterate on the firmware, but the most recent revision has **not** been replayed in the simulator. The wiring and the firmware are both verified by construction and by the local `tools/verify/` harness; the per-run observations quoted in [docs/functional-verification.md](docs/functional-verification.md) are development-time notes rather than a re-run of the current revision. See [docs/limitations.md](docs/limitations.md) for the outstanding items.
+
+The schematic below is generated directly from `diagram.json` and shows all 9 components and 25 connections as they are wired in the simulator.
 
 > **Note:** `diagram.json` uses the Blue Pill's short header labels (`A0`, `A1`, `A9`, `3V3.1`, `5V.1`, `GND.1`). Wokwi does not recognise long-form names such as `mcu:PA9` or `mcu:3.3V` and **silently discards those wires** without reporting an error.
 
@@ -298,9 +304,9 @@ pio test -e native
 pio check
 ```
 
-**Results:** 0 functional defects, 21 LOW-severity clang-tidy advisories (plus 1 compiler sign-compare warning and 1 benign memory-mapped-register finding).
+**Results:** 0 functional defects, 21 LOW-severity clang-tidy advisories (plus 1 compiler sign-compare warning and 2 benign memory-mapped-register findings).
 
-The advisories are `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `src/app/hal/oled.c`, `cert-err33-c` (3) in `src/app/tasks/display_task.c`, and `cert-err33-c` (1) in `src/drivers/uart_mutex.c` — all for deliberately discarded bounded `snprintf`/`vsnprintf` return values. One further static-analyzer finding, `core.FixedAddressDereference` on the CMSIS `CoreDebug` register block, is a direct memory-mapped peripheral access and not a defect. No correctness or safety issue was detected. `pio check` delegates to `cppcheck`; the findings above were produced with `clang-tidy`.
+The advisories are `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `src/app/hal/oled.c`, `cert-err33-c` (3) in `src/app/tasks/display_task.c`, and `cert-err33-c` (1) in `src/drivers/uart_mutex.c` — all for deliberately discarded bounded `snprintf`/`vsnprintf` return values. The two static-analyzer findings are both `core.FixedAddressDereference` — a direct memory-mapped peripheral access, which is how embedded code addresses hardware and not a defect. One is the DWT cycle-counter access in `dht22.c`; the other is the vector-table read in `diag.c`, written in a form the analyzer cannot fold into a constant so that the relocation stays visible. No correctness or safety issue was detected. `pio check` delegates to `cppcheck`; the findings above were produced with `clang-tidy`.
 
 See [docs/static-analysis.md](docs/static-analysis.md) for complete findings table.
 
@@ -311,7 +317,7 @@ vendor ARM toolchain, using only `gcc`, `clang`, `clang-tidy` and `python3`:
 
 ```bash
 ./tools/verify/run_tests.sh           # 33/33 native unit tests
-./tools/verify/run_static_analysis.sh # 0 defects, 21 advisories, 1 warning, 1 benign MMIO finding
+./tools/verify/run_static_analysis.sh # 0 defects, 21 advisories, 1 warning, 2 benign MMIO findings
 ./tools/verify/run_size_analysis.sh   # cross-compile src/ for Cortex-M3 and report section sizes
 ```
 
@@ -322,18 +328,31 @@ what it deliberately does not.
 
 ## Functional Verification
 
-| Test ID | Stimulus | Expected Result | Actual | Status |
-|---------|----------|-----------------|--------|--------|
-| FT-01 | Set temp to 25°C | 25°C displayed | 25.0°C shown | PASS |
-| FT-02 | Set humidity to 60% | 60% displayed | 60.0% shown | PASS |
-| FT-03 | Cover LDR | Light value changes | Value drops | PASS |
-| FT-04 | Rotate encoder CW | Next page selected | Page advances | PASS |
-| FT-05 | Rotate encoder CCW | Previous page selected | Page reverses | PASS |
-| FT-06 | Set temp > 30°C | Alarm activates | Buzzer sounds | PASS |
-| FT-07 | Return temp to normal | Alarm stops | Buzzer silent | PASS |
-| FT-08 | Trigger PIR while INACTIVE | System returns to ACTIVE | Sensor page redrawn | PASS |
-| FT-09 | Wait 15 s without motion | System INACTIVE | OLED shows `SYSTEM INACTIVE` | PASS |
-| FT-10 | Run all tasks for 60 min | No deadlock or starvation | All tasks kept producing output | PASS |
+Each row below is a procedure from [docs/functional-verification.md](docs/functional-verification.md).
+The **Expected Result** column states the outcome the source code produces; it was verified by
+reading the code path that implements it, not by replaying the current revision in the
+simulator.
+
+| Test ID | Stimulus | Expected Result | Verified against |
+|---------|----------|-----------------|------------------|
+| FT-01 | Set temp to 25°C | `25.0 C` displayed | `display_task.c` `DrawTemperaturePage`; `%.1f` formatting in `temperature.c` |
+| FT-02 | Set humidity to 60% | `60.0 %` displayed | `display_task.c` `DrawHumidityPage` |
+| FT-03 | Cover LDR | Light page value drops | `ldr.c` ADC scaling; `DrawLightPage` |
+| FT-04 | Rotate encoder CW | Next page selected | `encoder.c` EXTI → `ENCODER_CW_BIT`; `input_task.c` |
+| FT-05 | Rotate encoder CCW | Previous page selected | `encoder.c` EXTI → `ENCODER_CCW_BIT`; `input_task.c` |
+| FT-06 | Set temp > 30°C | Alarm activates, buzzer sounds | `alarm.c` threshold; `alarm_task.c` buzzer drive |
+| FT-07 | Return temp to normal | Alarm clears, buzzer silent | `alarm.c` hysteresis; `alarm_task.c` |
+| FT-08 | Trigger PIR while INACTIVE | System returns to ACTIVE | `motion_task.c` → `MOTION_DETECTED_BIT`; `state_machine.c` |
+| FT-09 | Wait 15 s without motion | INACTIVE; OLED shows `SYSTEM INACTIVE` | `state_machine.c` timeout; `display_task.c:107-108` |
+| FT-10 | Run all tasks for 60 min | No deadlock or starvation | Task priorities and queue depths in `main.c` |
+
+> **Status note:** the `Actual Result` column was removed. Those entries recorded
+> development-time observations and could not all have held for the current revision — most
+> importantly, the decimal values in FT-01 and FT-02 could not have appeared before
+> `-Wl,-u,_printf_float` was added to `platformio.ini`, because the default newlib-nano
+> `printf` does not implement `%f`. See
+> [docs/functional-verification.md](docs/functional-verification.md) for what was and was
+> not observed.
 
 See [docs/functional-verification.md](docs/functional-verification.md) for the full step-by-step procedures and expected results.
 

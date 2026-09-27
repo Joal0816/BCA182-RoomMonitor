@@ -12,12 +12,14 @@ This matrix maps each functional requirement to its implementation (source files
 
 > **Scope note.** Unit-test coverage in this project is limited to the two pure-logic modules — temperature threshold evaluation (`src/app/logic/temperature.c`) and the room-occupancy state machine (`src/app/logic/state_machine.c`) — plus the encoder page-navigation arithmetic. Requirements whose behaviour depends on STM32 peripherals (ADC, I²C, timers, EXTI) are verified functionally rather than by unit test. Test suites are host-compiled and transcribe the decision logic inline; they do not link against the production `.c` files.
 
+> **What `VERIFIED` means.** The 33 unit tests in the `Unit:` column are re-runnable here and now: `tools/verify/run_tests.sh` executes them on the host and returns non-zero on any failure. The `Functional:` column is different in kind — those tests were run during development in Wokwi, and they have **not** been replayed against the current revision, because the simulator is not available in the environment that audits these documents. `VERIFIED` therefore means "implementation located, unit coverage run, functional procedure specified", not "observed on this revision" and not "observed on hardware". See [functional-verification.md](functional-verification.md) for the per-test caveats and [limitations.md](limitations.md) for the simulator defects that bound what a Wokwi run can show.
+
 | Req ID | Requirement | Implementation | Verification | Status |
 |--------|-------------|----------------|--------------|--------|
 | FR-01 | Read temperature and humidity from DHT22 sensor | `src/app/hal/dht22.c` — `DHT22_Init()`, `DHT22_Read()`<br>`src/app/tasks/sensor_task.c` — `SensorTask()` | Unit: `test/test_temperature/test_main.c` (15 tests — threshold evaluation)<br>Functional: FT-02 | VERIFIED |
 | FR-02 | Read ambient light level from LDR via ADC | `src/app/hal/ldr.c` — `LDR_Init()`, `LDR_Read()`, `LDR_GetValue()`<br>`src/app/tasks/sensor_task.c` — `SensorTask()` | Functional: FT-03 | VERIFIED |
 | FR-03 | Detect motion via PIR sensor | `src/app/hal/pir.c` — `PIR_Init()`, `PIR_GetState()`, `PIR_EXTI_Callback()`<br>`src/app/tasks/motion_task.c` — `MotionTask()` | Functional: FT-08 | VERIFIED |
-| FR-04 | Display sensor data and system state on SSD1306 OLED | `src/app/hal/oled.c` — `OLED_Init()`, `OLED_Clear()`, `OLED_Update()`, `OLED_DrawString()`, `OLED_DrawProgressBar()`<br>`src/app/tasks/display_task.c` — `DisplayTask()` | Functional: FT-01, FT-02, FT-03 | VERIFIED |
+| FR-04 | Display sensor data and system state on SSD1306 OLED | `src/app/hal/oled.c` — `OLED_Init()`, `OLED_Clear()`, `OLED_Update()`, `OLED_DrawString()`, `OLED_DrawProgressBar()` (all I2C-returning entry points report `HAL_StatusTypeDef`)<br>`src/app/tasks/display_task.c` — `DisplayTask()` | Functional: FT-01, FT-02, FT-03 | VERIFIED |
 | FR-05 | Navigate display pages using rotary encoder input | `src/app/hal/encoder.c` — `Encoder_Init()`, `Encoder_GetDelta()`, `Encoder_CLK_EXTI_Callback()`<br>`src/app/tasks/input_task.c` — `InputTask()`<br>`display_page_queue` — created in `src/main.c` | Unit: `test/test_encoder/test_main.c` (10 tests)<br>Functional: FT-04, FT-05 | VERIFIED |
 | FR-06 | Evaluate temperature against thresholds and trigger buzzer alarm | `src/main.h` — `TEMP_LOW_THRESHOLD` (18.0f), `TEMP_HIGH_THRESHOLD` (30.0f)<br>`src/app/logic/temperature.c` — `EvaluateTemperature()`, `Temperature_IsAlarm()`<br>`src/app/logic/alarm.c` — `Alarm_Update()`<br>`src/app/hal/buzzer.c` — `Buzzer_Play()`, `Buzzer_Stop()` | Unit: `test/test_temperature/test_main.c` (15 tests)<br>Functional: FT-06, FT-07 | VERIFIED |
 | FR-07 | Maintain system state machine (ACTIVE / INACTIVE) | `src/app/logic/state_machine.c` — `StateMachine_Update()`, `StateMachine_GetState()`<br>Driven from `src/app/tasks/alarm_task.c` — `AlarmTask()`<br>Read by `src/app/tasks/display_task.c` | Unit: `test/test_state_machine/test_main.c` (8 tests)<br>Functional: FT-09, FT-10 | VERIFIED |
@@ -149,7 +151,7 @@ The 33 unit tests are the sum of the three suites (15 + 10 + 8); the temperature
 
 ## Traceability to Static Analysis
 
-Static analysis (see `docs/static-analysis.md`) reported **zero functional defects** and **21 LOW-severity clang-tidy advisories**, plus one compiler sign-compare warning and one benign memory-mapped-register finding. The advisories are confined to three files, so they do not map onto all ten requirements:
+Static analysis (see `docs/static-analysis.md`) reported **zero functional defects** and **21 LOW-severity clang-tidy advisories**, plus one compiler sign-compare warning and two benign memory-mapped-register findings. The advisories are confined to three files, so they do not map onto all ten requirements:
 
 | Requirement | Relevant Findings | Impact |
 |-------------|-------------------|--------|
@@ -175,6 +177,6 @@ All 10 functional requirements (FR-01 through FR-10) are implemented. Verificati
 - **10 functional tests** cover end-to-end behaviour, including the four requirements whose behaviour depends on STM32 peripherals and therefore cannot be unit-tested on a host
 - **3 fault experiments** (see `docs/fault-experiments.md`) exercise the blocking delay, the priority scheme, and the UART mutex
 
-Static analysis reported **no functional defects** — every one of the 23 observations is an advisory or a benign memory-mapped register access, and all are confined to the display and UART-print path.
+Static analysis reported **no functional defects** — every one of the 24 observations is an advisory or a benign memory-mapped register access, and all are confined to the display and UART-print path.
 
 Limitations and known gaps are recorded in `docs/limitations.md`.

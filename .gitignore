@@ -2,3 +2,7 @@
 
 # clang static-analyzer artifacts
 *.plist
+
+# Python bytecode from the verification scripts
+__pycache__/
+*.pyc

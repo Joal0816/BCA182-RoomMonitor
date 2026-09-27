@@ -5,6 +5,8 @@ void AlarmTask(void *pvParameters) {
     AlarmTaskParams_t *params = (AlarmTaskParams_t *)pvParameters;
     SensorData_t data;
 
+    UART_Mutex_Printf(params->uart_mutex, "[TASK] AlarmTask entered\r\n");
+
     for (;;) {
         if (xQueueReceive(params->sensor_queue, &data, pdMS_TO_TICKS(ALARM_CHECK_PERIOD_MS)) == pdPASS) {
             StateMachine_Update(params->state_machine, data.motion_detected);

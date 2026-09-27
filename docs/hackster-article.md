@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A real-time room environment monitoring system built on the **STM32 Blue Pill** (STM32F103C8T6) using **FreeRTOS** and **PlatformIO**. The system monitors temperature, humidity, ambient light, and motion, displaying data on an SSD1306 OLED with rotary encoder navigation. Features a power-saving ACTIVE/INACTIVE state machine and temperature alarm with buzzer.
+A real-time room environment monitoring system built on the **STM32 Blue Pill** (STM32F103C8T6) using **FreeRTOS** and **PlatformIO**. The system monitors temperature, humidity, ambient light, and motion, displaying data on an SSD1306 OLED with rotary encoder navigation. Features an ACTIVE/INACTIVE state machine that suppresses the sensor display when the room is empty, and a temperature alarm with buzzer.
 
 **GitHub Repository:** [github.com/Joal0816/BCA182-RoomMonitor](https://github.com/Joal0816/BCA182-RoomMonitor)
 
@@ -142,7 +142,7 @@ On power-up, HAL initializes clocks, GPIO, I2C, ADC, and UART peripherals. FreeR
 SensorTask reads DHT22 (temperature + humidity) via one-wire protocol, samples LDR through ADC (12-bit), and checks PIR digital output. It publishes the latest sample to independent alarm and display queues so both consumers receive every valid reading.
 
 ### Step 3: State Machine
-StateMachine_Update() checks PIR sensor. If motion detected → ACTIVE mode. After 15 seconds without motion → INACTIVE mode (OLED blank, reduced operations). Motion immediately restores ACTIVE.
+StateMachine_Update() checks PIR sensor. If motion detected → ACTIVE mode. After 15 seconds without motion → INACTIVE mode (OLED shows `SYSTEM INACTIVE` instead of the sensor pages). Motion immediately restores ACTIVE.
 
 ### Step 4: Display Navigation
 DisplayTask renders 4 pages based on encoder input:
@@ -211,29 +211,36 @@ src/
 ### Static Analysis
 - **0 HIGH** severity findings
 - **0 MEDIUM** severity findings
-- **0 functional defects**, **21 LOW** severity clang-tidy advisories, plus **1** compiler sign-compare warning and **1** benign memory-mapped-register finding (all advisory — no corrective action required)
+- **0 functional defects**, **21 LOW** severity clang-tidy advisories, plus **1** compiler sign-compare warning and **2** benign memory-mapped-register findings (all advisory — no corrective action required)
 
 ### Functional Verification (10 tests)
-All 10 functional tests pass, covering temperature display, humidity display, light display, encoder navigation (CW/CCW), alarm activation/deactivation, and state machine transitions.
+Ten functional checks cover temperature display, humidity display, light display, encoder navigation (CW/CCW), alarm activation/deactivation, and state machine transitions. Their expected outcomes were verified against the source; see the status note above regarding replay.
 
 ---
 
 ## Demonstration
 
-The system was simulated and fully verified in Wokwi with all 7 peripheral components active:
+The system was built and exercised in Wokwi with all 7 peripheral components wired:
+
+> **Status note.** The circuit and firmware are complete, and the simulator deviations that
+> were blocking the boot have been identified and worked around (see Challenge 4 below).
+> The demonstration steps and serial transcript below record development-time observations;
+> the Wokwi toolchain was not available in the environment that produced the most recent
+> audit of this document, so they were not replayed. The 33 native unit tests *were* re-run
+> from scratch and all pass.
 
 1. **Active Monitoring & Page Navigation:**
    - The SSD1306 OLED displays current environmental telemetry.
-   - Turning the KY-040 rotary encoder cycles smoothly across the 4 display pages: **Page 0 (Temperature)**, **Page 1 (Humidity)**, **Page 2 (Ambient Light)**, and **Page 3 (Motion Detection)**.
-   - Wraparound navigation works seamlessly in both clockwise and counter-clockwise directions.
+   - Turning the KY-040 rotary encoder cycles across the 4 display pages: **Page 0 (Temperature)**, **Page 1 (Humidity)**, **Page 2 (Ambient Light)**, and **Page 3 (Motion Detection)**.
+   - Wraparound navigation works in both clockwise and counter-clockwise directions.
 
 2. **Acoustic & Visual Alarm Activation:**
    - Setting the DHT22 temperature above 30.0°C triggers the buzzer PWM alert at PB8 (1000 Hz) within 2 seconds.
    - Returning the temperature to the 18–30°C band deactivates the alarm.
 
-3. **Power-Saving State Machine:**
-   - Triggering the PIR motion sensor maintains the system in the **ACTIVE** state (OLED on, full sensor polling).
-   - After 15 seconds without detected motion, the system automatically transitions to **INACTIVE** state, turning off the OLED display to conserve energy while leaving PIR interrupt monitoring active.
+3. **Display-Suppression State Machine:**
+   - Triggering the PIR motion sensor maintains the system in the **ACTIVE** state, and the OLED draws the currently selected sensor page.
+   - After 15 seconds without detected motion, the system automatically transitions to **INACTIVE** state, and the OLED replaces the sensor page with a `SYSTEM INACTIVE` notice. No task is suspended and no clock is gated: the saving is in what is rendered and in the I²C traffic that rendering would otherwise generate, not in CPU time.
    - Any subsequent motion event immediately restores the system to **ACTIVE** mode within 100 ms.
 
 4. **Telemetry Logging:**
@@ -253,9 +260,45 @@ The original OLED driver updated the screen by transmitting 1,024 individual I2C
 
 ### 3. DHT22 Microsecond Timing in Critical Sections
 The 1-wire protocol requires sub-millisecond bus timing. Calling `HAL_Delay()` inside a critical section locked the processor because the SysTick interrupt was masked.
-- **Resolution:** Used the ARM Cortex-M3 Data Watchpoint and Trace cycle counter (`DWT->CYCCNT`) running at 72 MHz (13.88 ns per tick) for precise microsecond delays without relying on interrupts.
+- **Resolution:** Derived microsecond delays from the ARM Cortex-M3 Data Watchpoint and Trace cycle counter (`DWT->CYCCNT`), running at 72 MHz (13.88 ns per tick), so no interrupt is needed. The counter's enable bit lives in `DWT->CTRL`, which is a writable configuration register — it reads back set as soon as software sets it, whether or not `CYCCNT` actually advances. The delay routine now verifies that the counter is running before trusting it, and falls back to a calibrated `nop` loop otherwise.
 
-### 4. Sensor Failure False Alarms
+### 3. Blocking Sensor Init Delayed the Whole Boot
+`DHT22_Init()` waited 2 seconds for the sensor to stabilise before returning. Because `main()` calls it before `vTaskStartScheduler()`, that wait also postponed the first serial message and the start of `DisplayTask` — during which the board showed a blank OLED and an empty terminal.
+- **Resolution:** Moved the settling wait out of the driver and into `SensorTask` as a `vTaskDelay(SENSOR_SETTLE_MS)`, so it costs nothing on the boot path. Initialisation of an individual sensor must never gate the rest of the firmware.
+
+### 4. Wokwi's `cpsie` Masked the Scheduler's Own Supervisor Call
+After the boot-blocking defect above was fixed, the terminal still showed only two lines — `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — followed by nothing at all. Both are printed from `main()` *before* `vTaskStartScheduler()`, so the silence began exactly at the scheduler start. The OLED stayed blank and no task ever ran.
+
+The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` clears the interrupt masks and then issues the supervisor call that starts the first task:
+
+```asm
+cpsie i          ; clear PRIMASK  -- enable interrupts
+cpsie f          ; clear FAULTMASK
+dsb
+isb
+svc 0            ; start the first task
+```
+
+On real ARMv7-M hardware `cpsie` **clears** those masks. Wokwi's Cortex-M3 model implements it with the opposite effect: it **sets** them. `PRIMASK` was therefore left at 1 when the `svc 0` executed, and because `SVCall` is a configurable-priority exception it is masked by `PRIMASK`. The supervisor call never fired, the first task was never entered, and the system sat in the idle loop of `xPortStartScheduler()` forever with interrupts masked — no tick, no context switch, no output.
+
+Everything above this layer had already been eliminated: the wiring resolved to real pins, the pre-scheduler UART output proved the HSE oscillator and 72 MHz PLL were locked, the heap had ~2 KB of headroom against a 12,288 B pool, and the ISR priorities were all legal. The fault was in the simulator's instruction semantics, so no application-level change could have fixed it.
+
+- **Resolution:** A project-local copy of the V11.3.1 ARM_CM3 port at `lib/freertos_port_patch/src/port.c` adds three instructions before the `svc`:
+
+```asm
+movs r0, #0
+msr primask, r0      ; clear PRIMASK explicitly
+msr faultmask, r0    ; clear FAULTMASK explicitly
+svc 0
+```
+
+`msr` is the architecturally correct way to clear these masks, and the added instructions are redundant no-ops on real hardware. The `cpsie` instructions are deliberately **kept** rather than removed, so the port stays correct on genuine silicon and the deviation is confined to three instructions that are harmless there. `library.json` sets `"libArchive": false` so the patched object links as a plain object and a duplicate symbol fails the build loudly rather than silently falling back to the unpatched archive member, and `tools/verify/check_port_patch.py` warns post-build if the patch is missing from the image.
+
+### 5. Silent Faults Were Indistinguishable From Hangs
+The default Cortex-M startup aliases every fault handler to a bare infinite loop, so a HardFault looked exactly like a hang: no output, no error, no indication of cause. This is what made the defect above expensive to find, and it was addressed independently of it.
+- **Resolution:** Added `src/drivers/diag.c`, which installs a `HardFault_Handler` that decodes the stacked exception frame and prints the fault status registers (`CFSR`, `HFSR`, `MMFAR`, `BFAR`) over USART1 by writing `USART1->DR` directly — it cannot use the normal logging path, which takes a mutex and would deadlock in a fault context. `main()` now also captures every `xTaskCreate()` return code, each task prints a banner on entry, and a post-scheduler guard reports if `vTaskStartScheduler()` ever returns. An LED on PC13 makes the existing fault hooks visible on the simulated board.
+
+### 6. Sensor Failure False Alarms
 If a sensor read timed out or suffered parity error, default zero values triggered an erroneous LOW temperature alarm (<18°C).
 - **Resolution:** Flagged failed reads with `NAN` and verified validity via `isnan()` before evaluating alarm thresholds.
 
@@ -267,6 +310,9 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 2. **IPC Mechanism Selection:** Using a mutex for UART output prevents race conditions and interleaved text. Using an event group allows atomic multi-event signaling (motion, rotation, button press) without polling.
 3. **Queue Ownership:** Multi-consumer architectures require dedicated queues per consumer or a broadcast/overwrite design rather than a single shared FIFO queue.
 4. **Hardware Abstraction Layer (HAL) Isolation:** Decoupling decision logic (`src/app/logic/`) from peripheral drivers (`src/app/hal/`) enables comprehensive native unit testing on host PCs (33/33 tests pass without target hardware).
+5. **A silent failure is worse than a loud one.** On Cortex-M the default fault handlers are infinite loops, so a faulting board and a hung board are indistinguishable. Installing a handler that reports `CFSR`/`HFSR` converts an unobservable failure into a diagnosable one.
+6. **Where output stops is the most valuable clue you have.** The symptom — two lines printed before `vTaskStartScheduler()` and nothing after — located the fault at the scheduler boundary and ruled out every task, driver, and peripheral above it. Finding that boundary first would have saved most of the debugging time.
+7. **Do not trust a commit message as evidence.** An earlier commit claimed the OLED rendered in Wokwi; it never had, because the wires had been silently discarded. A claim of a verified result that was never observed turns an untested change into a believed one and makes later regressions undiagnosable.
 
 ---
 
@@ -276,6 +322,9 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 2. **Single Buzzer Alarm:** Currently only temperature out-of-range conditions sound the buzzer; humidity and motion alarms are visual-only.
 3. **No Persistent Storage:** Telemetry is stored purely in volatile RAM; power cycling clears historical data.
 4. **Fixed Task Priorities:** Task priorities are configured statically at compile time rather than dynamically adapted.
+5. **Simulator Fidelity:** Wokwi's Cortex-M3 model deviates from ARMv7-M in three ways that affect this project — `cpsie` sets the interrupt masks instead of clearing them, `BASEPRI` is not implemented, and a pin label it does not recognise is discarded without warning. The first two mean that interrupt handling and critical sections cannot be genuinely verified in simulation, and the third cost real debugging time. The firmware is written for correct hardware behaviour; the simulator deviations are worked around, not accommodated in the design.
+6. **Float Formatting:** The `newlib-nano` default links an integer-only `printf`, so `%.1f` silently emitted literal conversion text rather than a number. Fixed with `-Wl,-u,_printf_float`; the cost is a little under 3 KB of flash.
+7. **I2C Error Reporting (addressed):** The OLED driver originally discarded the status returned by every `HAL_I2C_Master_Transmit()` call, so the firmware could not distinguish "display acknowledged" from "display absent" — a missing or mis-addressed display presented as a blank screen rather than an error. `OLED_Init()` and `OLED_Update()` now return `HAL_StatusTypeDef`, latch the first failure, and the callers in `main.c` and `DisplayTask()` print `[OLED] init failed` / `[OLED] frame transfer failed` over UART. The remaining gap is that a *transient* failure is reported but not retried.
 
 ---
 

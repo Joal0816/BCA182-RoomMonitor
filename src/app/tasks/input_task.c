@@ -4,6 +4,10 @@ void InputTask(void *pvParameters) {
     InputTaskParams_t *params = (InputTaskParams_t *)pvParameters;
     DisplayPage_t current_page = PAGE_TEMPERATURE;
 
+    /* Printed before the first blocking call so that "the task started" is
+       distinguishable from "the task started but is parked". */
+    UART_Mutex_Printf(params->uart_mutex, "[TASK] InputTask entered\r\n");
+
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 

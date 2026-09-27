@@ -3,6 +3,8 @@
 void MotionTask(void *pvParameters) {
     MotionTaskParams_t *params = (MotionTaskParams_t *)pvParameters;
 
+    UART_Mutex_Printf(params->uart_mutex, "[TASK] MotionTask entered\r\n");
+
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 

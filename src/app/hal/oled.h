@@ -10,11 +10,19 @@
 typedef struct {
     I2C_HandleTypeDef *hi2c;
     uint8_t buffer[OLED_WIDTH * OLED_HEIGHT / 8];
+    /* Result of the most recent I2C transaction.  HAL_OK means the panel
+       acknowledged; anything else means the panel is absent or the bus is
+       stuck.  Without this the driver cannot tell "OLED ACKed" from
+       "OLED not on the bus", because HAL_I2C_Master_Transmit's status was
+       previously discarded. */
+    HAL_StatusTypeDef last_status;
 } OLED_t;
 
-void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
+/* Returns HAL_OK only if the whole init sequence was acknowledged. */
+HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
 void OLED_Clear(OLED_t *oled);
-void OLED_Update(OLED_t *oled);
+/* Returns the status of the frame-buffer transfer. */
+HAL_StatusTypeDef OLED_Update(OLED_t *oled);
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color);
 void OLED_DrawChar(OLED_t *oled, uint8_t x, uint8_t y, char c, uint8_t size);
 void OLED_DrawString(OLED_t *oled, uint8_t x, uint8_t y, const char *str, uint8_t size);

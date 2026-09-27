@@ -60,9 +60,18 @@ void DisplayTask(void *pvParameters) {
     SensorData_t data;
     DisplayPage_t current_page = PAGE_TEMPERATURE;
 
+    /* First statement in the only task that is runnable the instant the
+       scheduler starts.  If this line is missing from the log, the scheduler
+       never handed control to any task, and the OLED being blank is a
+       consequence of that rather than a separate I2C problem. */
+    UART_Mutex_Printf(params->uart_mutex, "[TASK] DisplayTask entered\r\n");
+
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
-    OLED_Update(params->oled);
+    if (OLED_Update(params->oled) != HAL_OK) {
+        UART_Mutex_Printf(params->uart_mutex,
+                          "[OLED] frame transfer failed (panel not ACKing)\r\n");
+    }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -104,7 +113,10 @@ void DisplayTask(void *pvParameters) {
                 OLED_DrawString(params->oled, 10, 45, "INACTIVE", 2);
             }
 
-            OLED_Update(params->oled);
+            if (OLED_Update(params->oled) != HAL_OK) {
+                UART_Mutex_Printf(params->uart_mutex,
+                                  "[OLED] frame transfer failed (panel not ACKing)\r\n");
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(DISPLAY_REFRESH_MS));

@@ -14,12 +14,17 @@
 |----------|-------|--------|
 | HIGH | 0 | None |
 | MEDIUM | 0 | None |
-| LOW | 22 | Style / defensive-coding advisories — no corrective action required |
+| LOW | 24 | 2 benign memory-mapped-register findings, 21 style / defensive-coding advisories, 1 compiler warning — no corrective action required |
 
-**Total findings:** 22  
+**Total findings:** 24  
 **Functional defects:** 0
 
-Analysis was performed in three passes. The **clang static analyzer** produced exactly one finding — `core.FixedAddressDereference` on the CMSIS `CoreDebug` register block in `src/app/hal/dht22.c:51`. That is a direct access to a memory-mapped peripheral register, which is how embedded code addresses hardware; it is reported here for completeness and is **not** a defect. Every remaining finding comes from the lower-severity `bugprone-*` and `cert-*` advisory checks, which flag stylistic and defensive-coding patterns rather than defects.
+Analysis was performed in three passes. The **clang static analyzer** produced exactly two findings, and both are `core.FixedAddressDereference` on a memory-mapped peripheral register:
+
+1. The CMSIS `CoreDebug` register block in `src/app/hal/dht22.c:85` — the DWT cycle-counter enable, which must touch a fixed debug register.
+2. The single VTOR store in `src/drivers/diag.c:183`. Relocating the vector table is the fix for the boot failure documented in §7.5 of the laboratory report, and it necessarily writes one fixed address. The read-back of the same register is performed with an explicit `asm` load precisely so that only the intentional store is reported.
+
+Both are direct accesses to memory-mapped peripheral registers, which is how embedded code addresses hardware; they are reported here for completeness and are **not** defects. Every remaining finding comes from the lower-severity `bugprone-*` and `cert-*` advisory checks, which flag stylistic and defensive-coding patterns rather than defects.
 
 **Reproduce this yourself:** `tools/verify/run_static_analysis.sh` re-runs all three passes and prints the counts. See `tools/verify/README.md`.
 
@@ -57,12 +62,12 @@ Only findings located within project sources (`src/`) are counted; findings aris
 
 ### 1. Narrowing Conversions — 10 findings
 
-All 10 occur inside `OLED_DrawLine()` in `src/app/hal/oled.c` (lines 112–132), where the Bresenham accumulator mixes `int` with `int16_t`.
+All 10 occur inside `OLED_DrawLine()` in `src/app/hal/oled.c` (lines 109–129), where the Bresenham accumulator mixes `int` with `int16_t`.
 
 | Lines | Message |
 |-------|---------|
-| 112, 113, 116, 125, 127, 128, 131, 132 | `narrowing conversion from 'int' to signed type 'int16_t' is implementation-defined` |
-| 112, 113 | (second occurrence per line) |
+| 109, 110, 113, 122, 124, 125, 128, 129 | `narrowing conversion from 'int' to signed type 'int16_t' is implementation-defined` |
+| 109, 110 | (second occurrence per line) |
 
 **Interpretation:** These are **advisory, not defects.** `int` → `int16_t` conversion is implementation-defined only when the `int` value falls outside the representable `int16_t` range. The accumulators hold pixel coordinates bounded by `OLED_WIDTH` (128) and `OLED_HEIGHT` (64), so the conversion never overflows in practice.
 
@@ -74,11 +79,11 @@ All 10 occur inside `OLED_DrawLine()` in `src/app/hal/oled.c` (lines 112–132),
 
 | Line | Function | Message |
 |------|----------|---------|
-| `oled.c:76` | `OLED_SetPixel` | 2 adjacent `uint8_t` parameters easily swapped |
-| `oled.c:86` | `OLED_DrawChar` | 2 adjacent parameters of convertible types easily swapped |
-| `oled.c:111` | `OLED_DrawLine` | 2 adjacent `uint8_t` parameters easily swapped (×2) |
-| `oled.c:144` | `OLED_FillRect` | 2 and 3 adjacent `uint8_t` parameters easily swapped |
-| `oled.c:152` | `OLED_DrawProgressBar` | 2 adjacent `uint8_t` parameters easily swapped |
+| `oled.c:73` | `OLED_SetPixel` | 2 adjacent `uint8_t` parameters easily swapped |
+| `oled.c:83` | `OLED_DrawChar` | 2 adjacent parameters of convertible types easily swapped |
+| `oled.c:108` | `OLED_DrawLine` | 2 adjacent `uint8_t` parameters easily swapped (×2) |
+| `oled.c:141` | `OLED_FillRect` | 2 and 3 adjacent `uint8_t` parameters easily swapped |
+| `oled.c:149` | `OLED_DrawProgressBar` | 2 adjacent `uint8_t` parameters easily swapped |
 
 **Interpretation:** A **readability advisory shared by virtually every graphics API.** Signatures such as `OLED_FillRect(oled, x, y, w, h, color)` are conventional and self-documenting at every call site, which are all within `src/app/tasks/display_task.c`.
 
@@ -107,7 +112,7 @@ All three occur in `src/app/tasks/display_task.c` at lines 19, 32, and 43 — th
 
 | Location | Message |
 |----------|---------|
-| `src/app/hal/oled.c:49` | `comparison of integers of different signs: 'int' and 'size_t'` |
+| `src/app/hal/oled.c:41` | `comparison of integers of different signs: 'int' and 'size_t'` |
 
 `OLED_Clear()` iterates with `for (int i = 0; i < sizeof(oled->buffer); i++)` comparing a signed loop counter against the unsigned `sizeof`. The buffer is 1,024 bytes (`OLED_WIDTH * OLED_HEIGHT / 8` = 128 × 64 / 8), far below `INT_MAX`.
 
@@ -134,10 +139,10 @@ For completeness, the following were checked and produced **nothing** in this co
 
 | Pass | Findings | Functional defects |
 |------|----------|-------------------|
-| clang static analyzer | 1 | 0 |
+| clang static analyzer | 2 | 0 |
 | clang-tidy (`bugprone-*`, `cert-*`) | 21 | 0 |
 | `clang -Wall -Wextra` | 1 | 0 |
 
-**No functional defect was detected.** No data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store was reported. The single analyzer finding is the benign memory-mapped register access described above. The 21 advisory findings are confined to `src/app/hal/oled.c` (10 narrowing conversions + 7 easily-swappable parameters = 17), `src/app/tasks/display_task.c` (3 deliberately discarded `snprintf` results), and `src/drivers/uart_mutex.c` (1 deliberately discarded `vsnprintf` result).
+**No functional defect was detected.** No data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store was reported. Both analyzer findings are the benign memory-mapped register accesses described above. The 21 advisory findings are confined to `src/app/hal/oled.c` (10 narrowing conversions + 7 easily-swappable parameters = 17), `src/app/tasks/display_task.c` (3 deliberately discarded `snprintf` results), and `src/drivers/uart_mutex.c` (1 deliberately discarded `vsnprintf` result).
 
 The `platformio.ini` `build_flags` do not currently enable `-Wall -Wextra`; the warning above was obtained by running the compiler with those flags explicitly and is recorded here for transparency. No remediation is required for correctness.

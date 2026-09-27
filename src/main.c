@@ -23,8 +23,25 @@
 #include "app/tasks/display_task.h"
 
 #include "drivers/uart_mutex.h"
+#include "drivers/diag.h"
 
 extern void xPortSysTickHandler(void);
+
+/* Strong override of the startup file's `bl SystemInit`.  The framework's copy
+   compiles to a bare `bx lr`, so nothing in the boot path has ever programmed
+   VTOR and it keeps its reset value of 0.  That is invisible on any part whose
+   flash is aliased to address 0 -- which is exactly what tieing BOOT0 low
+   selects on a real Blue Pill -- but where the alias is absent the core reads
+   the vector table from unmapped memory, which on a Cortex-M3 presents as a
+   hard fault taken before the first instruction of main() runs.  Symptom: a
+   dead board with no UART output and a blank OLED.
+
+   Reset_Handler reaches this before the .data copy and .bss clear, so it must
+   not depend on an initialised or zeroed static.  It assigns into a file-scope
+   pointer (held in .bss), which a C-store zeroes for us, and reads nothing. */
+void SystemInit(void) {
+    Diag_RelocateVectors();
+}
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -70,10 +87,26 @@ int main(void) {
     MX_TIM4_Init();
     MX_USART1_UART_Init();
 
+    /* Latch the diagnostic register addresses before anything can fail, then
+       report where the vector table actually lives.  The FreeRTOS Cortex-M
+       port validates the SVCall and PendSV slots in xPortStartScheduler()
+       whenever configCHECK_HANDLER_INSTALLATION is enabled -- and it is
+       enabled here because the macro is simply absent from FreeRTOSConfig.h,
+       so it defaults to 1.  If those slots do not hold the handlers the port
+       expects, that assert spins forever in a silent loop with interrupts
+       masked.  This line makes the condition visible in the log first. */
+    Diag_Init();
+    Diag_DumpVectorInfo();
+
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
-    OLED_Init(&oled, &hi2c1);
+    /* Report the I2C result: a panel that never ACKs is otherwise
+       indistinguishable from a panel that is present but not being drawn to. */
+    if (OLED_Init(&oled, &hi2c1) != HAL_OK) {
+        UART_Mutex_Printf(&uart_mutex, "[OLED] init failed: no ACK from 0x%02X\r\n",
+                          OLED_I2C_ADDR);
+    }
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
@@ -114,16 +147,33 @@ int main(void) {
     display_task_params.event_group = event_group;
     display_task_params.uart_mutex = &uart_mutex;
 
-    xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
-    xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3, &motion_task_params.task_handle);
-    xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
-    xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2, NULL);
-    xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
+    BaseType_t created;
+
+    /* Every xTaskCreate return code used to be discarded.  Each task needs
+       its TCB and stack carved out of the 12 KB FreeRTOS heap, so a failure
+       here means the task silently never runs -- indistinguishable, from the
+       outside, from the board not booting at all.  Report them. */
+    created  = xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
+    created |= xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3, &motion_task_params.task_handle);
+    created |= xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
+    created |= xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2, NULL);
+    created |= xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
+
+    if (created != pdPASS) {
+        UART_Mutex_Printf(&uart_mutex, "[MAIN] FATAL: xTaskCreate failed\r\n");
+    }
 
     UART_Mutex_Printf(&uart_mutex, "[MAIN] System initialized\r\n");
     UART_Mutex_Printf(&uart_mutex, "[MAIN] Starting FreeRTOS scheduler\r\n");
 
     vTaskStartScheduler();
+
+    /* Reached only if the scheduler could not start: vTaskStartScheduler()
+       returns to its caller when the idle task or the timer task could not be
+       created.  Previously this loop was silent, so the one failure mode that
+       explains "main's banner printed but no task ever ran" looked exactly
+       like a healthy board. */
+    Diag_Puts("[MAIN] FATAL: vTaskStartScheduler returned - out of heap?\r\n");
 
     while (1) {
     }

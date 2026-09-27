@@ -107,7 +107,21 @@
 #define vPortSVCHandler    SVC_Handler
 #define xPortPendSVHandler PendSV_Handler
 
-/* Assert */
-#define configASSERT(x) if((x) == 0) { taskDISABLE_INTERRUPTS(); for(;;); }
+/* Assert.
+ *
+ * The upstream default is `taskDISABLE_INTERRUPTS(); for(;;);` -- a silent
+ * spin.  On a Cortex-M3 that makes a failed assertion indistinguishable from a
+ * hang or a dead board, which is precisely the symptom this project chased for
+ * a while.  Route it through Diag_AssertFailed() instead so the failing file
+ * and line appear on the serial port before the halt.
+ *
+ * Diag_AssertFailed() writes the USART registers directly and takes no mutex,
+ * which is what makes it usable from an assertion: the assertion may well have
+ * fired while a task held the logging mutex, or with interrupts already
+ * masked.  It is declared here rather than pulled in via #include because this
+ * header is included very early -- before <stdint.h> in some translation
+ * units. */
+void Diag_AssertFailed(const char *file, int line) __attribute__((noreturn));
+#define configASSERT(x) if((x) == 0) { Diag_AssertFailed(__FILE__, __LINE__); }
 
 #endif /* FREERTOS_CONFIG_H */
