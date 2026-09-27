@@ -14,7 +14,7 @@
 | L-02 | Single buzzer (temperature only) | Low | Future: add humidity/motion alarms | Accepted |
 | L-03 | No persistent storage | Medium | Future: add SD card / flash logging | Documented |
 | L-04 | Fixed (compile-time) priority scheme | Low | Priorities validated during design phase | Accepted |
-| L-05 | Wokwi UART output unavailable | High | Wire PA9→$serialMonitor:RX in diagram.json | Fixed |
+| L-05 | Wokwi UART output unavailable | High | Use short Blue Pill pin labels and wire A9→$serialMonitor:RX in diagram.json | Fixed |
 | L-06 | Wokwi OLED display unavailable | High | Send frame buffer in one bulk I2C transaction | Fixed |
 
 ---
@@ -76,7 +76,7 @@ Resolution: Accepted. Priority scheme is appropriate for the fixed functionality
 
 **Original Issue:** Early simulation runs showed no serial output in the Wokwi terminal when calling `printf()` or `HAL_UART_Transmit()`.
 
-**Root Cause & Fix:** In Wokwi simulation, USART1 transmission requires an explicit connection to `$serialMonitor` in `diagram.json`. Pin PA9 (USART1_TX) was wired to `serialMonitor:RX` (`["mcu:PA9", "$serialMonitor:RX", "yellow", []]`). USART1 output now functions as expected at 115200 baud in the simulation terminal.
+**Root Cause & Fix:** Two distinct faults had to be corrected. First, USART1 transmission in Wokwi requires an explicit connection to `$serialMonitor` in `diagram.json`. Second, and more subtly, the connections were originally written using long-form pin identifiers (`mcu:PA9`, `mcu:PA1`, `mcu:3.3V`). Wokwi does not recognise these names and **silently discards the affected wires** rather than reporting an error, so only `mcu:GND.1` survived. The diagram was rewritten using the Blue Pill's short header labels (`A0`/`A1`/`A9`/`A10`, `3V3.1`, `5V.1`, `GND.1`), and the serial monitor is now wired as `["mcu:A9", "$serialMonitor:RX", "red", ["v0"]]`. USART1 output now functions as expected at 115200 baud in the simulation terminal.
 
 **Resolution:** Fully resolved and verified.
 
@@ -144,7 +144,7 @@ Given the Wokwi UART and OLED limitations, the project employs a three-tier veri
 | L-02 Single buzzer | Low | Medium — documented for future | Low |
 | L-03 No storage | Medium | Medium — acceptable for scope | Medium |
 | L-04 Fixed priority | Low | High — validated via experiments | Very Low |
-| L-05 No UART in Wokwi | High | Resolved — PA9 wired to serialMonitor | None |
+| L-05 No UART in Wokwi | High | Resolved — A9 wired to serialMonitor with short pin labels | None |
 | L-06 No OLED in Wokwi | High | Resolved — bulk I2C transfer fixed rendering | None |
 
 ---

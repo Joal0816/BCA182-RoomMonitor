@@ -82,8 +82,11 @@ The system uses the following physical components connected to the STM32 Blue Pi
 | Buzzer | PWM (TIM4_CH3) | PB8 | Timer-based PWM |
 | USART1 (debug serial) | UART | PA9 (TX), PA10 (RX) | 115200 baud |
 | Onboard LED | GPIO | PC13 | Active-low |
+| ST-Link V2 (programming) | SWD | PA13 (SWDIO), PA14 (SWCLK), NRST (optional) | 3.3V + GND reference; not used at runtime |
 
 All peripherals except PIR operate at 3.3V. PIR supply uses the 5V rail. The I2C bus requires open-drain configuration with pull-ups (4.7 kΩ to 3.3V on PB6 and PB7).
+
+The ST-Link V2 connects to the 4-pin SWD header (`3V3 / SWDIO / SWCLK / GND`) at the end of the board opposite the USB connector, with the optional `RST` line wired to `NRST`. Only `3.3V` and `GND` are used for reference; the ST-Link `5V` pin is left unconnected. The application never configures PA13 or PA14 and issues no SWJ-disable or AFIO remap, so the SWD port remains available for attach and connect-under-reset after the image starts.
 
 ### 2.2 Software Architecture
 
@@ -371,7 +374,7 @@ The following limitations remain in the current implementation:
 | L-04 | Fixed compile-time priority scheme | Priorities are compile-time constants. Runtime priority adjustment is possible with `vTaskPrioritySet()` but not implemented. | Accepted. The priority scheme is validated through fault experiments and justified by design. |
 
 **Note on Wokwi simulation:** Two previously identified simulation issues were **resolved** during development:
-- **UART output**: The serial terminal now works correctly. `PA9 (TX)` is connected to `$serialMonitor` in `diagram.json`. UART output appears in the Wokwi serial terminal.
+- **UART output**: The serial terminal now works correctly. `PA9 (TX)` is connected to `$serialMonitor` in `diagram.json`. The connections use the Blue Pill's short header labels (`A9`, `A10`, `3V3.1`, `5V.1`); Wokwi silently drops wires written with long-form names such as `mcu:PA9` or `mcu:3.3V`, which is what originally left the terminal empty. UART output appears in the Wokwi serial terminal at 115200 baud.
 - **OLED display**: The display now renders correctly. The original driver sent 1024 individual I2C transactions (one per pixel byte), which caused the Wokwi I2C simulation to stall. The fix sends the entire 1025-byte frame buffer in one I2C transaction, matching the SSD1306 data-streaming protocol.
 
 ### 7.3 Debugging Challenges Encountered

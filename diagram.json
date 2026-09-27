@@ -10,13 +10,14 @@
       "type": "board-stm32-bluepill",
       "id": "mcu",
       "top": 0,
-      "left": 0
+      "left": 0,
+      "attrs": {}
     },
     {
       "type": "wokwi-dht22",
       "id": "dht22",
-      "top": -120,
-      "left": 50,
+      "top": -180,
+      "left": -20,
       "attrs": {
         "temperature": "25",
         "humidity": "50"
@@ -25,15 +26,17 @@
     {
       "type": "wokwi-photoresistor-sensor",
       "id": "ldr",
-      "top": -120,
-      "left": 200,
-      "attrs": {}
+      "top": -180,
+      "left": 150,
+      "attrs": {
+        "lux": "500"
+      }
     },
     {
       "type": "wokwi-pir-motion-sensor",
       "id": "pir",
-      "top": -120,
-      "left": 350,
+      "top": -180,
+      "left": 310,
       "attrs": {
         "delayTime": "5",
         "inhibitTime": "1.2"
@@ -42,8 +45,8 @@
     {
       "type": "board-ssd1306",
       "id": "oled",
-      "top": 100,
-      "left": 50,
+      "top": 30,
+      "left": 250,
       "attrs": {
         "i2cAddress": "0x3c"
       }
@@ -51,14 +54,15 @@
     {
       "type": "wokwi-ky-040",
       "id": "encoder",
-      "top": 100,
-      "left": 280
+      "top": 360,
+      "left": 0,
+      "attrs": {}
     },
     {
       "type": "wokwi-buzzer",
       "id": "buzzer",
-      "top": 100,
-      "left": 480,
+      "top": 360,
+      "left": 200,
       "attrs": {
         "mode": "smooth",
         "volume": "0.8"
@@ -66,27 +70,28 @@
     }
   ],
   "connections": [
-    ["mcu:PA1", "dht22:SDA", "green", ["h0"]],
-    ["mcu:3.3V", "dht22:VCC", "red", ["h0"]],
-    ["mcu:GND.1", "dht22:GND", "black", ["h0"]],
-    ["mcu:PA0", "ldr:AO", "orange", ["h0"]],
-    ["mcu:3.3V", "ldr:VCC", "red", ["h0"]],
-    ["mcu:GND.1", "ldr:GND", "black", ["h0"]],
-    ["mcu:PB0", "pir:OUT", "red", ["h0"]],
-    ["mcu:5V", "pir:VCC", "red", ["h0"]],
-    ["mcu:GND.1", "pir:GND", "black", ["h0"]],
-    ["mcu:PB6", "oled:SCL", "blue", ["h0"]],
-    ["mcu:PB7", "oled:SDA", "purple", ["h0"]],
-    ["mcu:3.3V", "oled:VCC", "red", ["h0"]],
-    ["mcu:GND.1", "oled:GND", "black", ["h0"]],
-    ["mcu:PA2", "encoder:CLK", "cyan", ["h0"]],
-    ["mcu:PA3", "encoder:DT", "magenta", ["h0"]],
-    ["mcu:PA4", "encoder:SW", "yellow", ["h0"]],
-    ["mcu:3.3V", "encoder:VCC", "red", ["h0"]],
-    ["mcu:GND.1", "encoder:GND", "black", ["h0"]],
-    ["mcu:PB8", "buzzer:2", "red", ["h0"]],
-    ["mcu:GND.1", "buzzer:1", "black", ["h0"]],
-    ["mcu:PA9", "$serialMonitor:RX", "red", ["h0"]],
-    ["mcu:PA10", "$serialMonitor:TX", "blue", ["h0"]]
-  ]
+    ["mcu:3V3.1", "dht22:VCC", "red", ["v-30"]],
+    ["mcu:GND.1", "dht22:GND", "black", ["v-30"]],
+    ["mcu:A1", "dht22:SDA", "green", ["v-20"]],
+    ["mcu:3V3.1", "ldr:VCC", "red", ["v-40"]],
+    ["mcu:GND.1", "ldr:GND", "black", ["v-40"]],
+    ["mcu:A0", "ldr:AO", "orange", ["v-50"]],
+    ["mcu:5V.1", "pir:VCC", "red", ["v-60"]],
+    ["mcu:GND.1", "pir:GND", "black", ["v-60"]],
+    ["mcu:B0", "pir:OUT", "purple", ["v-70"]],
+    ["mcu:3V3.1", "oled:VCC", "red", ["v0"]],
+    ["mcu:GND.1", "oled:GND", "black", ["v0"]],
+    ["mcu:B6", "oled:SCL", "blue", ["v0"]],
+    ["mcu:B7", "oled:SDA", "magenta", ["v0"]],
+    ["mcu:3V3.1", "encoder:VCC", "red", ["v60"]],
+    ["mcu:GND.1", "encoder:GND", "black", ["v60"]],
+    ["mcu:A2", "encoder:CLK", "cyan", ["v40"]],
+    ["mcu:A3", "encoder:DT", "yellow", ["v40"]],
+    ["mcu:A4", "encoder:SW", "white", ["v40"]],
+    ["mcu:B8", "buzzer:2", "red", ["v70"]],
+    ["mcu:GND.1", "buzzer:1", "black", ["v70"]],
+    ["mcu:A9", "$serialMonitor:RX", "red", ["v0"]],
+    ["mcu:A10", "$serialMonitor:TX", "blue", ["v0"]]
+  ],
+  "dependencies": {}
 }
