@@ -6,6 +6,7 @@
 #   2. Native unit tests                       (33 expected)
 #   3. Static analysis                         (1 + 21 + 1 findings expected)
 #   4. Application-only size breakdown         (clang, indicative)
+#   5. platformio.ini consistency              (no local library named in lib_deps)
 #
 # Exits non-zero if any executed pass fails. Passes that cannot run on the
 # current host are reported as SKIPPED and do not fail the run.
@@ -24,7 +25,7 @@ SKIPPED=()
 banner() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 # --- 1. Real build (needs PlatformIO + the ARM toolchain) --------------------
-banner "1/4  Firmware build and memory footprint (PlatformIO)"
+banner "1/5  Firmware build and memory footprint (PlatformIO)"
 if command -v pio >/dev/null 2>&1; then
     if pio run -e bluepill_f103c8 2>&1 | tail -4; then
         PASSED+=("build")
@@ -46,16 +47,20 @@ else
 fi
 
 # --- 2. Unit tests ----------------------------------------------------------
-banner "2/4  Native unit tests"
+banner "2/5  Native unit tests"
 if bash tools/verify/run_tests.sh; then PASSED+=("tests"); else FAILED+=("tests"); fi
 
 # --- 3. Static analysis -----------------------------------------------------
-banner "3/4  Static analysis"
+banner "3/5  Static analysis"
 if bash tools/verify/run_static_analysis.sh; then PASSED+=("static-analysis"); else FAILED+=("static-analysis"); fi
 
 # --- 4. Application-only sizes ---------------------------------------------
-banner "4/4  Application-only size breakdown (clang, indicative)"
+banner "4/5  Application-only size breakdown (clang, indicative)"
 if bash tools/verify/run_size_analysis.sh; then PASSED+=("sizes"); else FAILED+=("sizes"); fi
+
+# --- 5. Configuration consistency ------------------------------------------
+banner "5/5  platformio.ini consistency"
+if python3 tools/verify/check_config.py; then PASSED+=("config"); else FAILED+=("config"); fi
 
 # --- Summary ----------------------------------------------------------------
 echo

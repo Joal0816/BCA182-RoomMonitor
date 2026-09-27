@@ -8,7 +8,6 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/lib/freertos_port_patch/src",
                 "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS",
                 "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS/FreeRTOS-Kernel/include",
                 "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS/FreeRTOS-Kernel/portable/GCC/ARM_CM3",
@@ -24,6 +23,7 @@
                 "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/STM32F1xx_HAL_Driver/Inc",
                 "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/STM32F1xx_HAL_Driver/Src",
                 "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/CMSIS/DSP/Include",
+                "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/lib/freertos_port_patch/src",
                 "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/Unity/src",
                 "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/BSP/Components/Common",
                 "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/BSP/Components/ak4343",
@@ -71,7 +71,6 @@
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/lib/freertos_port_patch/src",
                     "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS",
                     "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS/FreeRTOS-Kernel/include",
                     "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/PlatformIO-FreeRTOS/FreeRTOS-Kernel/portable/GCC/ARM_CM3",
@@ -87,6 +86,7 @@
                     "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/STM32F1xx_HAL_Driver/Inc",
                     "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/STM32F1xx_HAL_Driver/Src",
                     "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/CMSIS/DSP/Include",
+                    "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/lib/freertos_port_patch/src",
                     "/home/joal/Documents/BCA 182 - Embedded Systems Programming/BCA 182 - Laboratory Activity 1.worktrees/continue/.pio/libdeps/bluepill_f103c8/Unity/src",
                     "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/BSP/Components/Common",
                     "/home/joal/.platformio/packages/framework-stm32cubef1/Drivers/BSP/Components/ak4343",
