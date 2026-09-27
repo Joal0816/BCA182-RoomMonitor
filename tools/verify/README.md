@@ -18,7 +18,7 @@ an environment without PlatformIO:
 
 | Script | Purpose | Requires |
 |---|---|---|
-| `check_port_patch.py` | Post-build guard. Registered in `platformio.ini` via `extra_scripts`; globs `**/freertos_port_patch/port.o` and prints `[port-patch] OK`, so a build that silently fell back to the stock FreeRTOS port is caught. | `pio run` |
+| `check_port_patch.py` | Post-build guard. Registered in `platformio.ini` via `extra_scripts`; globs `**/freertos_port_patch/port.o` and prints `[port-patch] OK`, so a build that silently fell back to the stock FreeRTOS port is caught. It is a PlatformIO hook, not a standalone tool — running it with `python3` directly prints a notice and exits 2, because it needs the SCons `env` object PlatformIO injects. | `pio run` |
 | `../generate_wiring_diagram.py` | Renders `docs/wiring-diagram.png` directly from `diagram.json`, so the schematic cannot drift from the wiring. | Python 3 + Pillow |
 
 ## Why stub headers exist

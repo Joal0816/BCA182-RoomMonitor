@@ -14,9 +14,22 @@ diagnostic.  This script makes that visible in the build log.
 
 Every step is wrapped so that a problem in the check itself can never fail the
 build -- it only ever prints.
+
+This file is a PlatformIO `extra_scripts` hook, not a standalone tool: it needs
+the SCons `env` object that PlatformIO injects.  Running it directly with
+`python3` therefore cannot work, and it says so rather than raising NameError.
 """
 
-Import("env")
+try:
+    Import("env")
+except NameError:
+    import sys
+
+    sys.stderr.write(
+        "[port-patch] this is a PlatformIO post-build hook, not a standalone script.\n"
+        "[port-patch] it runs automatically during `pio run`; see tools/verify/README.md.\n"
+    )
+    sys.exit(2)
 
 import glob
 import os
