@@ -10,22 +10,22 @@
 
 | # | Limitation | Severity | Workaround | Status |
 |---|-----------|----------|------------|--------|
-| L-01 | DHT22 blocking read (~5 ms) | Low | Acceptable given 2 s sampling period | Accepted |
+| L-01 | DHT22 blocking read (~20 ms) | Low | Acceptable given 1 s sampling period (2% CPU) | Accepted |
 | L-02 | Single buzzer (temperature only) | Low | Future: add humidity/motion alarms | Accepted |
 | L-03 | No persistent storage | Medium | Future: add SD card / flash logging | Documented |
 | L-04 | Fixed (compile-time) priority scheme | Low | Priorities validated during design phase | Accepted |
-| L-05 | Wokwi UART output unavailable | High | Use short Blue Pill pin labels and wire A9→$serialMonitor:RX in diagram.json | Fixed |
+| L-05 | Wokwi UART output unavailable | High | Use short Blue Pill pin labels and wire `A9` → `$serialMonitor:RX` in `diagram.json` | Fixed |
 | L-06 | Wokwi OLED display unavailable | High | Send frame buffer in one bulk I2C transaction | Fixed |
 
 ---
 
 ## Detailed Descriptions
 
-### L-01: DHT22 Blocking Read (~5 ms)
+### L-01: DHT22 Blocking Read (~20 ms)
 
-The DHT22 driver uses a blocking wait during the single-wire read sequence. Each complete read operation holds the CPU for approximately 5 ms while waiting for timing-sensitive protocol responses.
+The DHT22 driver performs the entire single-wire read inside a `taskENTER_CRITICAL()` section. The fixed protocol delays total ~19.2 ms (`DHT22_Delay_us(18000)` plus `DHT22_Delay_us(40)` plus 40 × `DHT22_Delay_us(30)`), and the 40 high-phase polls add roughly 1 ms, so the scheduler is blocked for about 20 ms per read.
 
-This blocking behavior is acceptable because the 5 ms block represents only 0.25% of the 2-second sampling period. FreeRTOS ISR handling remains operational during blocking reads. Converting to DMA or interrupt-driven I/O would add complexity disproportionate to the impact.
+This blocking behavior is acceptable because 20 ms represents 2% of the 1-second sampling period. Note the scope precisely: `taskENTER_CRITICAL()` on this port raises BASEPRI to `configMAX_SYSCALL_INTERRUPT_PRIORITY`, so it does **not** disable all interrupts. SysTick (priority 0) still fires and the tick count stays accurate; only interrupts at or below `configMAX_SYSCALL_INTERRUPT_PRIORITY` are deferred, so no FreeRTOS API may be called from them during this window. The DHT22's own timing is the reason for the critical section: the protocol's microsecond windows cannot tolerate being preempted. Converting to interrupt-driven or DMA I/O would add complexity disproportionate to the impact.
 
 Resolution: Accepted as a design trade-off. No code change required.
 
@@ -153,4 +153,12 @@ Given the Wokwi UART and OLED limitations, the project employs a three-tier veri
 
 All four primary project limitations (L-01 to L-04) are properly documented, technically justified, and accepted within the scope of Laboratory Activity 1. Initial simulation hurdles regarding UART serial transmission (L-05) and SSD1306 OLED rendering (L-06) were systematically diagnosed and fully resolved through proper Wokwi wiring and bulk I2C transmission optimizations.
 
-For grading purposes, all functional requirements are verified through the combination of native unit tests (33 tests, all passing), Wokwi full-circuit simulation (all peripherals operational), fault experiments (3 documented), and static code analysis (0 defects).
+For grading purposes, all functional requirements are verified through the combination of native unit tests (33 tests, all passing), Wokwi full-circuit simulation, fault experiments (3 documented), and static code analysis (0 functional defects; 20 clang-tidy advisories and 1 compiler warning).
+
+**Evidence limits.** Three claims in this documentation could not be independently re-verified in the environment used to audit it, and are flagged as such at each point of use:
+
+1. The firmware was **not rebuilt** — no `pio`, no `arm-none-eabi-gcc`, and no `.elf`/`.map` from a prior build. The RAM and Flash figures in the report's §7.1 are reproduced as previously reported.
+2. The **Wokwi simulation was not re-run** — the tests in `docs/functional-verification.md` record development-time observations. Their expected results were checked against the source; the runs themselves were not replayed.
+3. The **fault experiments have no stored logs**. Their *predicted* outcomes are derived deterministically from `src/FreeRTOSConfig.h` and the task priorities in `src/main.c` and therefore hold regardless of any run; the *observed* sections record what was seen at development time. The two are labelled separately.
+
+What *was* re-verified: all 33 unit tests were recompiled and re-run (33/33 pass), and the static analysis was re-executed from scratch with the exact commands in `docs/static-analysis.md`. Every file path, symbol name, constant, task priority, and queue name cited anywhere in this documentation was checked against `src/`.

@@ -1,7 +1,8 @@
 # Static Analysis Report — BCA182 Room Monitoring System
 
-**Tool:** PlatformIO Check (`pio check`)  
-**Analyzers:** cppcheck, clangtidy, libsane  
+**Tools:** LLVM clang-tidy 22.1.8, clang static analyzer (LLVM 22.1.8), `clang -Wall -Wextra`  
+**Target:** STM32F103C8T6 + FreeRTOS application sources  
+**Scope:** 15 application `.c` files — `src/app/hal/` (6), `src/app/logic/` (3), `src/app/tasks/` (5), `src/drivers/` (1). `src/main.c` is excluded from this pass because it depends on STM32CubeMX-generated peripheral initialisation that is not reproducible outside the vendor toolchain.  
 **Date:** September 2026  
 **Codebase:** STM32F103C8T6 + FreeRTOS HAL application
 
@@ -13,141 +14,127 @@
 |----------|-------|--------|
 | HIGH | 0 | None |
 | MEDIUM | 0 | None |
-| LOW | 111 | Style warnings — no action required |
+| LOW | 20 | Style / defensive-coding advisories — no corrective action required |
 
-**Total findings:** 111  
+**Total findings:** 20  
 **Functional defects:** 0
+
+Analysis was performed in three passes. The **clang static analyzer** — the pass whose purpose is detecting genuine defects such as null dereferences, dead stores, use-after-free, and buffer overruns — reported **zero findings** across all 15 translation units. Every finding listed below comes from the lower-severity `bugprone-*` and `cert-*` advisory checks, which flag stylistic and defensive-coding patterns rather than defects.
+
+---
+
+## Analysis Method
+
+The firmware targets an STM32F103 and normally builds under PlatformIO (`pio run -e bluepill_f103c8`), which is unavailable in the analysis environment. To analyse the application logic without the vendor SDK, a minimal stub header set was provided for the externally-supplied APIs (`stm32f1xx_hal.h`, `FreeRTOS.h`, `task.h`, `queue.h`, `semphr.h`, `event_groups.h`) and the translation units were analysed individually:
+
+```bash
+INC="-nostdinc -I<stubs> -Isrc -Isrc/app -Isrc/app/hal -Isrc/app/logic -Isrc/app/tasks -Iinclude"
+
+# Pass 1 — deep flow-sensitive defect detection
+for f in $(find src/app src/drivers -name '*.c'); do
+    clang --analyze -std=c99 $INC "$f" -o /dev/null
+done
+
+# Pass 2 — advisory checks
+for f in $(find src/app src/drivers -name '*.c'); do
+    clang-tidy "$f" --checks='clang-analyzer-*,bugprone-*,cert-*' \
+        -- $INC -std=c99 -fsyntax-only
+done
+
+# Pass 3 — compiler warnings
+for f in $(find src/app src/drivers -name '*.c'); do
+    clang -std=c99 -fsyntax-only -Wall -Wextra $INC "$f"
+done
+```
+
+Only findings located within project sources (`src/`) are counted; findings arising from the stub headers themselves were excluded.
 
 ---
 
 ## Findings by Category
 
-### 1. Unused Parameters in FreeRTOS Callbacks — 42 findings
+### 1. Narrowing Conversions — 10 findings
 
-| ID | Severity | File | Message | Justification |
-|----|----------|------|---------|---------------|
-| SA-01 | LOW | `main.c` | Parameter `argument` unused in `vApplicationStackOverflowHook` | FreeRTOS callback signature requires this parameter; implementation intentionally ignores it |
-| SA-02 | LOW | `main.c` | Parameter `xTask` unused in `vApplicationStackOverflowHook` | Used only in debug `printf` (compiled out in release) |
-| SA-03 | LOW | `main.c` | Parameter `pxTask` unused in `vApplicationIdleHook` | FreeRTOS idle hook signature; no idle processing required |
-| SA-04 | LOW | `main.c` | Parameter `pcTaskName` unused in `vApplicationMallocFailedHook` | Callback required by FreeRTOS config; implementation is a trap |
-| SA-05 | LOW | `main.c` | Parameter `ulTimerID` unused in `vTimerCallback` | Timer ID not needed for single-timer implementation |
-| SA-06–SA-42 | LOW | Various | Similar unused parameter warnings in HAL and FreeRTOS hooks | Same pattern: mandatory callback signatures |
+All 10 occur inside `OLED_DrawLine()` in `src/app/hal/oled.c` (lines 112–132), where the Bresenham accumulator mixes `int` with `int16_t`.
 
-**Interpretation:** These findings are **benign.** FreeRTOS and STM32 HAL define callback signatures that must match the expected prototype. Unused parameters are a consequence of the framework's API design, not a coding defect.
+| Lines | Message |
+|-------|---------|
+| 112, 113, 116, 125, 127, 128, 131, 132 | `narrowing conversion from 'int' to signed type 'int16_t' is implementation-defined` |
+| 112, 113 | (second occurrence per line) |
 
----
+**Interpretation:** These are **advisory, not defects.** `int` → `int16_t` conversion is implementation-defined only when the `int` value falls outside the representable `int16_t` range. The accumulators hold pixel coordinates bounded by `OLED_WIDTH` (128) and `OLED_HEIGHT` (64), so the conversion never overflows in practice.
 
-### 2. Include Order Warnings — 35 findings
-
-| ID | Severity | File | Message | Justification |
-|----|----------|------|---------|---------------|
-| SA-43 | LOW | `tasks/sensor_task.c` | `#include` order does not group system headers before project headers | clangtidy `llvm-header-guard` check; style preference only |
-| SA-44 | LOW | `tasks/display_task.c` | `#include` order does not group system headers before project headers | Same |
-| SA-45 | LOW | `drivers/dht22.c` | `#include` order does not group system headers before project headers | Same |
-| SA-46–SA-77 | LOW | Various | Similar include order warnings | Same pattern across all source files |
-
-**Interpretation:** These are **style-only warnings** from clangtidy's `llvm-header-guard` and `misc-include-cleaner` checks. The include order does not affect compilation or runtime behavior. STM32 HAL headers have specific ordering requirements that take precedence over general style guidelines.
+**Status:** Accepted. Making the conversion explicit (`(int16_t)` casts) would document intent but change no behaviour.
 
 ---
 
-### 3. Variable Naming Conventions — 18 findings
+### 2. Easily-Swappable Parameters — 7 findings
 
-| ID | Severity | File | Message | Justification |
-|----|----------|------|---------|---------------|
-| SA-78 | LOW | `drivers/dht22.c` | Variable `pin` does not follow `camelCase` convention | HAL-style naming convention used throughout HAL drivers |
-| SA-79 | LOW | `drivers/ldr.c` | Variable `adc_handle` does not follow naming convention | Consistent with STM32 HAL naming patterns |
-| SA-80 | LOW | `tasks/alarm_task.c` | Variable `temp_threshold` uses snake_case | FreeRTOS task code uses snake_case consistently |
-| SA-81–SA-95 | LOW | Various | Similar naming convention warnings | Mixed naming: HAL uses camelCase, application code uses snake_case |
+| Line | Function | Message |
+|------|----------|---------|
+| `oled.c:76` | `OLED_SetPixel` | 2 adjacent `uint8_t` parameters easily swapped |
+| `oled.c:86` | `OLED_DrawChar` | 2 adjacent parameters of convertible types easily swapped |
+| `oled.c:111` | `OLED_DrawLine` | 2 adjacent `uint8_t` parameters easily swapped (×2) |
+| `oled.c:144` | `OLED_FillRect` | 2 and 3 adjacent `uint8_t` parameters easily swapped |
+| `oled.c:152` | `OLED_DrawProgressBar` | 2 adjacent `uint8_t` parameters easily swapped |
 
-**Interpretation:** The codebase follows **two consistent naming conventions:**
-- `camelCase` for HAL driver code (matching STM32 HAL style)
-- `snake_case` for application and FreeRTOS task code (matching FreeRTOS examples)
+**Interpretation:** A **readability advisory shared by virtually every graphics API.** Signatures such as `OLED_FillRect(oled, x, y, w, h, color)` are conventional and self-documenting at every call site, which are all within `src/app/tasks/display_task.c`.
 
-This is a deliberate design choice for code organization, not an inconsistency.
-
----
-
-### 4. Magic Number Warnings — 10 findings
-
-| ID | Severity | File | Message | Justification |
-|----|----------|------|---------|---------------|
-| SA-96 | LOW | `tasks/alarm_task.c` | Literal `30` used in comparison | Temperature threshold; defined as `TEMP_THRESHOLD_HIGH` in header |
-| SA-97 | LOW | `tasks/alarm_task.c` | Literal `28` used in comparison | Temperature threshold; defined as `TEMP_THRESHOLD_LOW` in header |
-| SA-98 | LOW | `tasks/display_task.c` | Literal `100` used in delay | Display refresh period in ms |
-| SA-99–SA-105 | LOW | Various | Similar magic number warnings | All numeric literals are threshold constants or timing values |
-
-**Interpretation:** Many of these warnings are **false positives** — the analyzer reports the usage site but does not resolve the `#define` constant name. The actual code uses named constants:
-
-```c
-#define TEMP_THRESHOLD_HIGH  30.0f
-#define TEMP_THRESHOLD_LOW   28.0f
-#define DISPLAY_REFRESH_MS   100
-```
+**Status:** Accepted. Introducing wrapper structs (`Point`, `Rect`) would be the analyzer's implied remedy but would obscure the drawing code.
 
 ---
 
-### 5. Potential Side Effects in Macros — 6 findings
+### 3. Unchecked Return Values — 3 findings
 
-| ID | Severity | File | Message | Justification |
-|----|----------|------|---------|---------------|
-| SA-106 | LOW | `config/project_config.h` | Macro `CLAMP(val, min, max)` evaluates argument multiple times | Macro is used with simple variables only; no side effects in arguments |
-| SA-107 | LOW | `config/project_config.h` | Macro `BIT(n)` evaluates argument multiple times | Argument is always a literal constant |
-| SA-108–SA-111 | LOW | Various | Similar macro warnings | Macros are intentionally used for compile-time constants |
+All three occur in `src/app/tasks/display_task.c` at lines 19, 32, and 43 — the `snprintf()` calls that format the temperature, humidity, and light-level strings into a local `char buf[32]`.
 
-**Interpretation:** The macros in question are **simple value macros** used with literal constants or simple variables. They do not evaluate arguments with side effects (e.g., `i++`), so the multiple-evaluation concern is theoretical in this codebase.
+| Line | Message |
+|------|---------|
+| 19 | return value of `snprintf` disregarded (`cert-err33-c`) |
+| 32 | return value of `snprintf` disregarded (`cert-err33-c`) |
+| 43 | return value of `snprintf` disregarded (`cert-err33-c`) |
 
----
+**Interpretation:** `snprintf()` truncates rather than overflows, so the buffer cannot be overrun. The formatted values are a float to one decimal place (`"%.1f C"`), a float (`"%.1f %%"`), and a 12-bit integer (`"%d"`) — the widest possible output is well inside 32 bytes.
 
-## Detailed Findings Table
-
-| # | Severity | ID | Analyzer | File | Line | Message |
-|---|----------|----|----------|------|------|---------|
-| 1 | LOW | SA-01 | cppcheck | main.c | 45 | Unused parameter: argument |
-| 2 | LOW | SA-02 | cppcheck | main.c | 45 | Unused parameter: xTask |
-| 3 | LOW | SA-03 | cppcheck | main.c | 52 | Unused parameter: pxTask |
-| 4 | LOW | SA-04 | cppcheck | main.c | 58 | Unused parameter: pcTaskName |
-| 5 | LOW | SA-05 | cppcheck | main.c | 64 | Unused parameter: ulTimerID |
-| 6 | LOW | SA-06 | cppcheck | tasks/sensor_task.c | 12 | Unused parameter: argument |
-| 7 | LOW | SA-07 | cppcheck | tasks/display_task.c | 15 | Unused parameter: argument |
-| 8 | LOW | SA-08 | cppcheck | tasks/input_task.c | 10 | Unused parameter: argument |
-| 9 | LOW | SA-09 | cppcheck | tasks/motion_task.c | 8 | Unused parameter: argument |
-| 10 | LOW | SA-10 | cppcheck | tasks/alarm_task.c | 11 | Unused parameter: argument |
-| 11 | LOW | SA-43 | clangtidy | tasks/sensor_task.c | 1 | Include order: system before project |
-| 12 | LOW | SA-44 | clangtidy | tasks/display_task.c | 1 | Include order: system before project |
-| 13 | LOW | SA-45 | clangtidy | drivers/dht22.c | 1 | Include order: system before project |
-| 14 | LOW | SA-46 | clangtidy | drivers/ldr.c | 1 | Include order: system before project |
-| 15 | LOW | SA-47 | clangtidy | drivers/pir.c | 1 | Include order: system before project |
-| 16 | LOW | SA-48 | clangtidy | drivers/oled.c | 1 | Include order: system before project |
-| 17 | LOW | SA-49 | clangtidy | drivers/encoder.c | 1 | Include order: system before project |
-| 18 | LOW | SA-50 | clangtidy | drivers/buzzer.c | 1 | Include order: system before project |
-| 19 | LOW | SA-78 | clangtidy | drivers/dht22.c | 23 | Variable `pin` naming convention |
-| 20 | LOW | SA-79 | clangtidy | drivers/ldr.c | 15 | Variable `adc_handle` naming |
-| 21 | LOW | SA-80 | clangtidy | tasks/alarm_task.c | 34 | Variable `temp_threshold` naming |
-| 22 | LOW | SA-96 | cppcheck | tasks/alarm_task.c | 42 | Literal `30` used (magic number) |
-| 23 | LOW | SA-97 | cppcheck | tasks/alarm_task.c | 45 | Literal `28` used (magic number) |
-| 24 | LOW | SA-106 | cppcheck | config/project_config.h | 12 | Macro CLAMP multiple evaluation |
-| 25 | LOW | SA-107 | cppcheck | config/project_config.h | 15 | Macro BIT multiple evaluation |
-
-*(Remaining 86 findings follow the same patterns as described above; abbreviated for clarity.)*
+**Status:** Accepted, with the following caveat recorded for completeness: the return value *would* matter if a format string could grow. A defensive `(void)` cast documents the deliberate discard. Not corrected, because the maximum output length is bounded by the format strings and the value ranges.
 
 ---
 
-## Interpretation
+### 4. Compiler Warnings (`-Wall -Wextra`) — 1 finding
 
-### No Functional Defects
+| Location | Message |
+|----------|---------|
+| `src/app/hal/oled.c:49` | `comparison of integers of different signs: 'int' and 'size_t'` |
 
-All 111 findings are classified as LOW severity. No HIGH or MEDIUM severity issues were found. The codebase is **free of functional defects** as detected by static analysis.
+`OLED_Clear()` iterates with `for (int i = 0; i < sizeof(oled->buffer); i++)` comparing a signed loop counter against the unsigned `sizeof`. The buffer is 1026 bytes, far below `INT_MAX`.
 
-### Nature of Findings
+**Status:** Accepted. Strictly, the loop counter should be `size_t`; the signed type is safe here but the warning is legitimate.
 
-| Category | Count | Impact on Correctness |
-|----------|-------|----------------------|
-| Unused parameters (callbacks) | 42 | None — mandatory API signatures |
-| Include order | 35 | None — style preference only |
-| Naming conventions | 18 | None — consistent within each layer |
-| Magic numbers | 10 | None — false positives; constants used |
-| Macro side effects | 6 | None — macros used with literals only |
+---
 
-### Conclusion
+## Categories That Produced No Findings
 
-The static analysis results confirm that the BCA182 Room Monitoring System codebase meets professional code quality standards. All findings are style-level warnings inherent to the STM32 HAL and FreeRTOS API patterns. No remediation is required. The 0 HIGH / 0 MEDIUM finding count indicates a robust and well-structured codebase.
+For completeness, the following were checked and produced **nothing** in this codebase — several are commonly assumed to be present in FreeRTOS projects:
+
+| Category | Findings | Note |
+|----------|----------|------|
+| Unused parameters in FreeRTOS callbacks | 0 | The `bugprone-*` / `cert-*` check set does not include `-Wunused-parameter`; those warnings are only emitted by `-Wextra` and none were reported |
+| Include order | 0 | `clang-tidy` `llvm-header-guard` is not part of the selected check set |
+| Naming conventions | 0 | Not covered by the selected check set |
+| Magic numbers | 0 | Not covered by the selected check set |
+| Macro multiple-evaluation | 0 | The codebase defines no function-like macros of this kind |
+| Dead stores | 0 | Reported by the static analyzer pass, which found nothing |
+
+---
+
+## Verdict
+
+| Pass | Findings | Functional defects |
+|------|----------|-------------------|
+| clang static analyzer | 0 | 0 |
+| clang-tidy (`bugprone-*`, `cert-*`) | 20 | 0 |
+| `clang -Wall -Wextra` | 1 | 0 |
+
+**No functional defect was detected.** No data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store was reported by the defect-oriented analyzer pass. All 20 advisory findings are confined to `src/app/hal/oled.c` (drawing arithmetic and parameter shape) and `src/app/tasks/display_task.c` (deliberate discard of bounded `snprintf` results).
+
+The `platformio.ini` `build_flags` do not currently enable `-Wall -Wextra`; the warning above was obtained by running the compiler with those flags explicitly and is recorded here for transparency. No remediation is required for correctness.

@@ -125,10 +125,10 @@ Room monitoring systems are fundamental to IoT and smart building applications. 
 
 | Primitive | Type | Producer | Consumer | Purpose |
 |-----------|------|----------|----------|---------|
-| alarm_sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t |
+| sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t |
 | display_sensor_queue | Queue (depth 1) | SensorTask | DisplayTask | Latest SensorData_t |
 | display_page_queue | Queue (depth 1) | InputTask | DisplayTask | Current display page |
-| event_group | Event Group | MotionTask, InputTask | DisplayTask | Motion/encoder events |
+| event_group | Event Group | MotionTask, InputTask | DisplayTask | `MOTION_DETECTED_BIT`, `ENCODER_CW_BIT`, `ENCODER_CCW_BIT`, `ENCODER_BTN_BIT` |
 | uart_mutex | Mutex | Any task | UART1 | Protect serial output |
 
 ---
@@ -211,7 +211,7 @@ src/
 ### Static Analysis
 - **0 HIGH** severity findings
 - **0 MEDIUM** severity findings
-- **111 LOW** severity (style warnings only)
+- **0 functional defects**, **20 LOW** severity clang-tidy advisories, plus **1** compiler sign-compare warning (all advisory — no corrective action required)
 
 ### Functional Verification (10 tests)
 All 10 functional tests pass, covering temperature display, humidity display, light display, encoder navigation (CW/CCW), alarm activation/deactivation, and state machine transitions.
@@ -229,7 +229,7 @@ The system was simulated and fully verified in Wokwi with all 7 peripheral compo
 
 2. **Acoustic & Visual Alarm Activation:**
    - Setting the DHT22 temperature above 30.0°C triggers the buzzer PWM alert at PB8 (1000 Hz) within 2 seconds.
-   - Lowering the temperature below 28.0°C deactivates the alarm.
+   - Returning the temperature to the 18–30°C band deactivates the alarm.
 
 3. **Power-Saving State Machine:**
    - Triggering the PIR motion sensor maintains the system in the **ACTIVE** state (OLED on, full sensor polling).
@@ -244,8 +244,8 @@ The system was simulated and fully verified in Wokwi with all 7 peripheral compo
 ## Challenges Encountered
 
 ### 1. Dual-Consumer Queue Contention
-Initially, a single FreeRTOS queue was shared between `AlarmTask` and `DisplayTask`. Because FreeRTOS queues are destructive on read (`xQueueReceive()`), whichever task woke first consumed the sensor telemetry packet, causing the other task to starve until the next 2-second sampling interval.
-- **Resolution:** Refactored into a dual-queue fan-out architecture (`alarm_sensor_queue` and `display_sensor_queue`), each of depth 1. `SensorTask` updates both using `xQueueOverwrite()`, guaranteeing that both consumers always have immediate access to the latest sample.
+Initially, a single FreeRTOS queue was shared between `AlarmTask` and `DisplayTask`. Because FreeRTOS queues are destructive on read (`xQueueReceive()`), whichever task woke first consumed the sensor telemetry packet, causing the other task to starve until the next 1-second sampling interval.
+- **Resolution:** Refactored into a dual-queue fan-out architecture (`sensor_queue` and `display_sensor_queue`), each of depth 1. `SensorTask` updates both using `xQueueOverwrite()`, guaranteeing that both consumers always have immediate access to the latest sample.
 
 ### 2. SSD1306 Virtual I2C Bus Bottleneck
 The original OLED driver updated the screen by transmitting 1,024 individual I2C transactions (one for each pixel byte). This saturated Wokwi's virtual I2C engine and caused the display to freeze.
@@ -272,7 +272,7 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 
 ## Limitations
 
-1. **DHT22 Blocking Read (~5 ms):** The single-wire read sequence holds the CPU for ~5 ms with interrupts masked. This represents only 0.25% of the 2-second sampling period and is deemed acceptable.
+1. **DHT22 Blocking Read (~20 ms):** The single-wire read sequence runs inside `taskENTER_CRITICAL()`, holding the scheduler off for roughly 20 ms. That is 2% of the 1-second sampling period and is deemed acceptable; the critical section raises BASEPRI rather than masking all interrupts, so SysTick still ticks.
 2. **Single Buzzer Alarm:** Currently only temperature out-of-range conditions sound the buzzer; humidity and motion alarms are visual-only.
 3. **No Persistent Storage:** Telemetry is stored purely in volatile RAM; power cycling clears historical data.
 4. **Fixed Task Priorities:** Task priorities are configured statically at compile time rather than dynamically adapted.

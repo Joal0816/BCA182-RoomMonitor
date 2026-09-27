@@ -83,11 +83,11 @@ This laboratory demonstrates:
 
 | Task | Responsibility | Trigger/Period | Priority | IPC | Typical Blocked Condition |
 |------|---------------|----------------|----------|-----|--------------------------|
-| SensorTask | Read DHT22 + LDR | 1s periodic | 2 | Alarm/display queues | `vTaskDelayUntil()` |
-| DisplayTask | Manage OLED | Event/update | 1 | `display_sensor_queue`, `display_page_queue`, event group | Waiting for data |
+| SensorTask | Read DHT22 + LDR + PIR | 1 s periodic | 2 | `sensor_queue`, `display_sensor_queue` | `vTaskDelayUntil()` |
+| DisplayTask | Manage OLED | 100 ms refresh | 1 | `display_sensor_queue`, `display_page_queue`, event group | `vTaskDelay()` |
 | InputTask | Process encoder | Event-driven | 3 | Event Group | `ulTaskNotifyTake()` |
 | MotionTask | Monitor PIR | Event-driven | 3 | Event Group | `ulTaskNotifyTake()` |
-| AlarmTask | Evaluate alarm + control buzzer | Sensor update | 2 | `alarm_sensor_queue` | `xQueueReceive()` |
+| AlarmTask | Evaluate alarm + control buzzer + advance state machine | Sensor update | 2 | `sensor_queue` | `xQueueReceive()` |
 
 ### Priority Justification
 
@@ -99,10 +99,10 @@ This laboratory demonstrates:
 
 | Primitive | Type | Producer | Consumer | Purpose |
 |-----------|------|----------|----------|---------|
-| alarm_sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t for alarm evaluation |
+| sensor_queue | Queue (depth 1) | SensorTask | AlarmTask | Latest SensorData_t for alarm evaluation |
 | display_sensor_queue | Queue (depth 1) | SensorTask | DisplayTask | Latest SensorData_t for OLED rendering |
 | display_page_queue | Queue (depth 1) | InputTask | DisplayTask | Current display page |
-| event_group | Event Group | MotionTask, InputTask | DisplayTask | Motion detected, encoder events |
+| event_group | Event Group | MotionTask, InputTask | DisplayTask | `MOTION_DETECTED_BIT`, `ENCODER_CW_BIT`, `ENCODER_CCW_BIT`, `ENCODER_BTN_BIT` |
 | uart_mutex | Mutex | Any task | UART1 | Protect serial output from interleaving |
 
 ---
@@ -298,9 +298,9 @@ pio test -e native
 pio check
 ```
 
-**Results:** 0 HIGH, 0 MEDIUM, 111 LOW severity findings.
+**Results:** 0 functional defects, 20 LOW-severity advisory findings (plus 1 compiler sign-compare warning).
 
-All LOW findings are style warnings (unused parameters, include order, naming conventions). No correctness or safety issues detected.
+The advisories are `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `src/app/hal/oled.c`, and `cert-err33-c` (3) in `src/app/tasks/display_task.c` for deliberately discarded bounded `snprintf` return values. No correctness or safety issue was detected. `pio check` delegates to `cppcheck`; the findings above were produced with `clang-tidy`.
 
 See [docs/static-analysis.md](docs/static-analysis.md) for complete findings table.
 
@@ -317,11 +317,17 @@ See [docs/static-analysis.md](docs/static-analysis.md) for complete findings tab
 | FT-05 | Rotate encoder CCW | Previous page selected | Page reverses | PASS |
 | FT-06 | Set temp > 30°C | Alarm activates | Buzzer sounds | PASS |
 | FT-07 | Return temp to normal | Alarm stops | Buzzer silent | PASS |
-| FT-08 | Trigger PIR | System ACTIVE | OLED on | PASS |
-| FT-09 | Wait 15s without motion | System INACTIVE | OLED blank | PASS |
-| FT-10 | Trigger PIR while INACTIVE | System returns ACTIVE | OLED on | PASS |
+| FT-08 | Trigger PIR while INACTIVE | System returns to ACTIVE | Sensor page redrawn | PASS |
+| FT-09 | Wait 15 s without motion | System INACTIVE | OLED shows `SYSTEM INACTIVE` | PASS |
+| FT-10 | Run all tasks for 60 min | No deadlock or starvation | All tasks kept producing output | PASS |
 
-See [docs/functional-verification.md](docs/functional-verification.md) for detailed procedures.
+See [docs/functional-verification.md](docs/functional-verification.md) for the full step-by-step procedures and expected results.
+
+> **Test-ID note:** an earlier revision of this table used `FT-01…FT-10` for a Wokwi
+> stimulus checklist that differed from the canonical procedures in
+> [docs/functional-verification.md](docs/functional-verification.md). That stimulus
+> checklist now lives in the report's §5.2 as **WF-01…WF-10**, and `FT-01…FT-10` is
+> reserved for the canonical procedures.
 
 ---
 

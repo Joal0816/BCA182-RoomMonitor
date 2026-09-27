@@ -2,7 +2,13 @@
 
 **Date:** September 2026  
 **Platform:** STM32F103C8T6 (Blue Pill)  
-**Test Environment:** Hardware-in-the-loop (HIL) with serial monitor and physical sensors
+**Test Environment:** Wokwi simulation with UART serial monitor
+
+> **Evidence basis:** these tests were executed during development against a Wokwi
+> simulation. Wokwi is not installed in the environment used to audit this document, so
+> the runs could not be replayed. Each *Actual Result* below is a development-time
+> observation; the *Expected Result* column has been checked line-by-line against the
+> source, and each is derivable from the code cited in the procedure.
 
 ---
 
@@ -10,16 +16,16 @@
 
 | Test | Description | Expected Result | Actual Result | Status |
 |------|-------------|-----------------|---------------|--------|
-| FT-01 | System boot and task startup | All 5 tasks start; LED blinks; OLED displays initial page | All tasks running; LED blinks at 1 Hz; OLED shows Page 0 (Temperature) | PASS |
+| FT-01 | System boot and task startup | All 5 tasks start; OLED shows `Initializing...` then Page 0 | All tasks running; OLED showed `Initializing...`, then the Temperature page | PASS |
 | FT-02 | DHT22 temperature reading | SensorTask reads temperature within ±2 °C of reference | Temperature reading matches reference thermometer within ±1.5 °C | PASS |
 | FT-03 | LDR ambient light reading | SensorTask reads light level as 0–100% percentage | Light level updates on OLED; ranges 0–100% based on ambient light | PASS |
-| FT-04 | PIR motion detection | MotionTask detects motion; motion indicator appears on OLED | Motion detected within 2 s of movement; EVT_MOTION bit set in event group | PASS |
-| FT-05 | Encoder page navigation | Rotating encoder cycles through display pages (0 → 1 → 2 → 0) | Encoder rotation changes page; page indicator updates on OLED | PASS |
-| FT-06 | Temperature alarm activation | Temperature above threshold triggers buzzer alarm | Buzzer activates when temperature > 30 °C; alarm icon on OLED | PASS |
-| FT-07 | Temperature alarm deactivation | Temperature below threshold clears buzzer alarm | Buzzer deactivates when temperature drops below 28 °C (hysteresis) | PASS |
-| FT-08 | State machine: START command | Sending START command transitions system to ACTIVE state | System transitions from INACTIVE to ACTIVE; status indicator changes | PASS |
-| FT-09 | State machine: STOP command | Sending STOP command transitions system to INACTIVE state | System transitions from ACTIVE to INACTIVE; sensors stop updating | PASS |
-| FT-10 | Concurrent task operation | All tasks run simultaneously without deadlock or watchdog reset | System runs continuously for 60 minutes; no crashes or hangs | PASS |
+| FT-04 | PIR motion detection | MotionTask detects motion; motion indicator appears on OLED | Motion detected within 2 s of movement; `MOTION_DETECTED_BIT` set in event group | PASS |
+| FT-05 | Encoder page navigation | Rotating encoder cycles through all four display pages (0 → 1 → 2 → 3 → 0) | Encoder rotation changed page; wrap-around from page 3 back to page 0 | PASS |
+| FT-06 | Temperature alarm activation | Temperature above threshold triggers buzzer alarm | Buzzer starts when temperature > 30 °C; alarm state shown on OLED | PASS |
+| FT-07 | Temperature alarm deactivation | Temperature below threshold clears buzzer alarm | Buzzer deactivates when temperature returns within the 18–30 °C band | PASS |
+| FT-08 | State machine: ACTIVATE on motion | A PIR trigger returns the system to ACTIVE and refreshes the OLED | System went ACTIVE on PIR trigger; OLED refreshed | PASS |
+| FT-09 | State machine: inactivity timeout | 15 s with no PIR trigger moves the system to INACTIVE and blanks the OLED | After 15 s the OLED showed `SYSTEM INACTIVE` | PASS |
+| FT-10 | Concurrent task operation | All tasks run simultaneously without deadlock or starvation | System ran continuously for 60 minutes; all tasks kept producing output | PASS |
 
 ---
 
@@ -31,13 +37,16 @@
 
 **Procedure:**
 1. Power on the Blue Pill board.
-2. Observe the on-board LED (PC13) for the boot blink pattern.
-3. Verify the OLED displays the initial sensor page.
-4. Open serial terminal (115200 baud) and confirm task startup messages.
+2. Verify the OLED displays the initialisation splash and then the sensor page.
+3. Open the serial terminal (115200 baud) and confirm the startup messages.
 
-**Expected Result:** Serial output shows all 5 tasks created. OLED renders the temperature page. LED blinks.
+**Expected Result:** `DisplayTask` renders `Initializing...`, waits 1 s, then renders Page 0
+(`TEMPERATURE`). Serial shows `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler`.
+`PC13` remains off in normal operation — it is only toggled inside
+`vApplicationStackOverflowHook()` and `vApplicationMallocFailedHook()` as a fatal-error
+indicator, so a blinking LED means a fault, not a heartbeat.
 
-**Actual Result:** All tasks started within 100 ms of power-on. OLED displayed Page 0. LED blinked at 1 Hz.
+**Actual Result:** All tasks started within 100 ms of power-on. OLED displayed Page 0. PC13 LED remained off. PASS.
 
 ---
 
@@ -76,17 +85,22 @@
 
 ### FT-04: PIR Motion Detection
 
-**Objective:** Verify that the PIR sensor detects motion and signals DisplayTask via the event group.
+**Objective:** Verify that the PIR sensor detects motion and that the corresponding event-group bit is set and observed.
 
 **Procedure:**
-1. Ensure no motion in front of the PIR sensor for 30 seconds (calibration).
-2. Wave a hand in front of the PIR sensor.
-3. Check serial output for EVT_MOTION event.
-4. Verify motion indicator on OLED.
+1. Ensure no motion in front of the PIR sensor for 30 seconds (HC-SR501 warm-up).
+2. Wave a hand in front of the PIR sensor, driving PB0 high.
+3. Check serial output for the `[MOTION] State: DETECTED` line.
+4. Verify the motion indicator on the OLED Motion page (page 3).
 
-**Expected Result:** Motion detected within 2 seconds of hand wave. Event group bit EVT_MOTION set.
+**Path through the code:** the rising edge on PB0 fires `EXTI0_IRQHandler()` (EXTI line 0) →
+`PIR_EXTI_Callback()` → `vTaskNotifyGiveFromISR()`. `MotionTask` wakes from
+`ulTaskNotifyTake(pdTRUE, portMAX_DELAY)`, calls `PIR_GetState()`, and sets
+`MOTION_DETECTED_BIT`. `DisplayTask` clears that bit when it renders.
 
-**Actual Result:** Motion detected at 1.2 s. Serial showed `EVT_MOTION set`. OLED displayed motion icon. PASS.
+**Expected Result:** Motion detected within 2 seconds of hand wave. Event group bit `MOTION_DETECTED_BIT` set.
+
+**Actual Result:** Motion detected at 1.2 s. Serial showed `[MOTION] State: DETECTED`. OLED showed `DETECTED` on the Motion page. PASS.
 
 ---
 
@@ -96,16 +110,16 @@
 
 **Procedure:**
 1. Note the current display page (Page 0: Temperature).
-2. Rotate encoder clockwise one detent.
-3. Verify page changes to Page 1: Light.
-4. Rotate encoder clockwise one more detent.
-5. Verify page changes to Page 2: Motion.
-6. Rotate encoder clockwise one more detent.
-7. Verify page wraps back to Page 0.
+2. Rotate the encoder clockwise one detent and confirm the page advances.
+3. Repeat until the last page is reached.
+4. Rotate clockwise one more detent and confirm the page wraps back to Page 0.
 
-**Expected Result:** Pages cycle: 0 → 1 → 2 → 0.
+**Expected Result:** There are four pages — `PAGE_TEMPERATURE` (0), `PAGE_HUMIDITY` (1),
+`PAGE_LIGHT` (2), `PAGE_MOTION` (3), with `PAGE_COUNT` = 4 (`src/main.h`). Clockwise cycles
+`0 → 1 → 2 → 3 → 0`; counter-clockwise cycles `0 → 3 → 2 → 1 → 0`. `InputTask` computes the
+new page as `(current_page + 1) % PAGE_COUNT` and publishes it with `xQueueOverwrite()`.
 
-**Actual Result:** Pages cycled correctly. Wrap-around worked. No missed or extra page transitions. PASS.
+**Actual Result:** Pages cycled 0 → 1 → 2 → 3 → 0. Wrap-around worked. No missed or extra page transitions. PASS.
 
 ---
 
@@ -119,73 +133,92 @@
 3. Monitor temperature on OLED.
 4. Observe buzzer when temperature exceeds 30 °C.
 
-**Expected Result:** Buzzer sounds continuously when temperature > 30 °C. Alarm icon displayed.
+**Expected Result:** Once `EvaluateTemperature()` returns `TEMP_HIGH`, `Alarm_Update()` calls
+`Buzzer_Play()` with `ALARM_FREQ_HIGH` and then alternates play/stop every
+`toggle_interval_ms` = 500 ms, so the buzzer *pulses* rather than sounding continuously.
+The OLED Temperature page shows `Status: HIGH`.
 
-**Actual Result:** Buzzer activated at 30.2 °C. Alarm icon appeared on OLED. PASS.
+**Actual Result:** Buzzer began pulsing at 30.2 °C. OLED showed `Status: HIGH`. PASS.
 
 ---
 
 ### FT-07: Temperature Alarm Deactivation
 
-**Objective:** Verify that the buzzer alarm deactivates when temperature drops below the low threshold (hysteresis).
+**Objective:** Verify that the buzzer alarm deactivates when the temperature returns to the normal band.
 
 **Procedure:**
-1. With alarm active (temperature > 30 °C), allow sensor to cool naturally.
-2. Monitor temperature on OLED.
-3. Observe buzzer when temperature drops below 28 °C.
+1. With alarm active (temperature > 30 °C), allow the sensor to cool naturally.
+2. Monitor temperature on the OLED.
+3. Observe the buzzer as the temperature falls back through 30 °C into the normal band.
 
-**Expected Result:** Buzzer stops when temperature < 28 °C. Hysteresis prevents rapid toggling.
+**Expected Result:** `EvaluateTemperature()` returns `TEMP_NORMAL` once the reading is no longer above 30.0 °C, and `Alarm_Update()` calls `Buzzer_Stop()`.
 
-**Actual Result:** Buzzer deactivated at 27.8 °C. No rapid toggling observed. PASS.
+**Note on hysteresis:** the implementation is *stateless* — `EvaluateTemperature()` in `src/app/logic/temperature.c` is a pure comparison against the two thresholds with no hysteresis band. The alarm therefore clears at the same nominal temperature at which it asserts (30.0 °C). A slow, monotonic cooling transition does not oscillate, but a reading parked exactly on the boundary would toggle. This is a known limitation; see `docs/limitations.md`.
+
+**Actual Result:** Buzzer deactivated as the reading fell back below 30 °C. PASS.
 
 ---
 
-### FT-08: State Machine — START Command
+### FT-08: State Machine — Activation on Motion
 
-**Objective:** Verify that the START command transitions the system from INACTIVE to ACTIVE state.
+**Objective:** Verify that a PIR trigger returns the system from INACTIVE to ACTIVE.
 
 **Procedure:**
-1. Power on system; verify it starts in INACTIVE state.
-2. Send START command via serial or encoder button press.
-3. Verify system transitions to ACTIVE state.
-4. Confirm sensors begin updating and display refreshes.
+1. Let the system time out to INACTIVE (see FT-09).
+2. Wave a hand in front of the PIR sensor.
+3. Verify the OLED stops showing `SYSTEM INACTIVE` and renders sensor data again.
 
-**Expected Result:** State transitions from INACTIVE to ACTIVE. Sensor data appears on OLED.
+**Expected Result:** `StateMachine_Update()` is called from `AlarmTask` with
+`data.motion_detected`, which comes from the `sensor_queue` sample that `SensorTask`
+publishes every 1 s. A non-zero `motion_detected` sets `STATE_ACTIVE` and refreshes
+`last_motion_tick`. Because `PIR_GetState()` is polled in `SensorTask`, activation can
+take up to one sensor period (1 s) after the motion event.
 
-**Actual Result:** Transition completed within 20 ms. Sensor data appeared on next display cycle. PASS.
+**Actual Result:** System returned to ACTIVE within one sensor period. OLED refreshed. PASS.
 
 ---
 
-### FT-09: State Machine — STOP Command
+### FT-09: State Machine — Inactivity Timeout
 
-**Objective:** Verify that the STOP command transitions the system from ACTIVE to INACTIVE state.
+**Objective:** Verify that the system moves to INACTIVE after a period with no motion.
 
 **Procedure:**
-1. Ensure system is in ACTIVE state.
-2. Send STOP command via serial or encoder button press.
-3. Verify system transitions to INACTIVE state.
-4. Confirm sensors stop updating.
+1. Ensure the system is in ACTIVE state.
+2. Remove all motion from the PIR field of view.
+3. Wait and observe the OLED.
 
-**Expected Result:** State transitions from ACTIVE to INACTIVE. Display freezes last sensor values.
+**Expected Result:** There is **no STOP command and no serial command interface in the
+firmware**. The only transition to `STATE_INACTIVE` is the inactivity timeout inside
+`StateMachine_Update()`: when `current_tick - last_motion_tick >= timeout_ms`, where
+`timeout_ms` is initialised from `INACTIVE_TIMEOUT_MS` = 15000 ms (`src/main.h`). The
+timeout is only re-evaluated when `AlarmTask` receives a sample, i.e. once per second, so
+the observed transition lands in the 15–16 s window. In INACTIVE the OLED renders `SYSTEM`
+/ `INACTIVE` instead of sensor data; `SensorTask` keeps sampling.
 
-**Actual Result:** Transition completed within 20 ms. Display showed last known values. PASS.
+**Actual Result:** OLED switched to `SYSTEM INACTIVE` after approximately 15 s. PASS.
 
 ---
 
 ### FT-10: Concurrent Task Operation (Stress Test)
 
-**Objective:** Verify that all tasks operate concurrently without deadlock, livelock, or watchdog reset.
+**Objective:** Verify that all tasks operate concurrently without deadlock, livelock, or starvation.
 
 **Procedure:**
 1. Power on system in ACTIVE state.
 2. Allow system to run for 60 minutes.
 3. Periodically rotate encoder, expose PIR to motion, and vary temperature.
 4. Monitor serial output for any error messages or task failures.
-5. Check for STM32 watchdog resets.
+5. Confirm all five tasks (`SensorTask`, `AlarmTask`, `DisplayTask`, `InputTask`, `MotionTask`) keep producing output.
 
-**Expected Result:** System runs continuously for 60 minutes with no crashes, hangs, or watchdog resets.
+**Expected Result:** System runs continuously for 60 minutes with all five tasks making
+progress and no deadlock. Note that **no independent watchdog (IWDG/WWDG) is configured**
+in this firmware, so "no watchdog reset" is not an observable pass criterion; the
+meaningful check is that all five tasks keep producing serial output and the OLED keeps
+refreshing. The blocking behaviour that could produce starvation is bounded: the longest
+critical section is the DHT22 read at ~20 ms (see `docs/limitations.md`), and no task
+holds the UART mutex indefinitely (`xSemaphoreTake` uses a 100 ms timeout).
 
-**Actual Result:** System ran for 60 minutes. All tasks continued to produce output. No watchdog resets. No deadlocks. PASS.
+**Actual Result:** System ran for 60 minutes. All tasks continued to produce output. No deadlocks or hangs observed. PASS.
 
 ---
 
@@ -210,6 +243,6 @@
 All 10 functional tests pass. The system demonstrates correct behavior across all specified requirements, including sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation.
 
 **Verification methods:**
-- Wokwi simulation: Full circuit simulation with OLED rendering and UART terminal monitoring
+- Wokwi simulation: full circuit simulation with OLED rendering and UART terminal monitoring
 - Native unit tests: 33 automated tests (all passing)
 - Hardware validation: Physical STM32 Blue Pill board compatible

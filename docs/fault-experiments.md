@@ -3,21 +3,44 @@
 **Date:** September 2026  
 **Objective:** Validate system resilience by injecting controlled faults and observing system behavior.
 
+### Method
+
+Each experiment modifies exactly one design decision in the source, rebuilds the
+`bluepill_f103c8` target, and observes the running system (OLED output, serial log,
+buzzer, encoder response). The fault is then reverted and the baseline re-confirmed.
+
+**Evidence basis.** The *Fault applied* and *Predicted outcome* sections below are
+derived mechanically from the scheduler configuration in `src/FreeRTOSConfig.h`, the
+task priorities in `src/main.c`, and the blocking structure of each task — that is,
+they are deterministic consequences of the configuration, not measurements. The
+*Observed* sections record the run. Where a predicted outcome is a direct corollary of
+the configuration (for example, "a priority-3 task cannot be starved by a priority-2
+task"), it holds regardless of the run.
+
+Two settings govern every outcome below:
+
+- `configUSE_PREEMPTION 1` — a higher-priority ready task always preempts a lower-priority one.
+- `configUSE_TIME_SLICING 1` — equal-priority ready tasks round-robin on each tick.
+
+A task can therefore only starve another task that is *strictly lower priority* than it;
+equal-priority peers are time-sliced and higher-priority tasks preempt it.
+
 ---
+
 
 ## Experiment 1: Remove Blocking Delay from SensorTask
 
 ### What Was Done
 
-The `vTaskDelay(pdMS_TO_TICKS(2000))` call at the end of `SensorTask` was removed, causing the task to loop continuously without yielding CPU time.
+The `vTaskDelayUntil(&xLastWakeTime, xPeriod)` call at the end of `SensorTask` was removed, causing the task to loop continuously without ever blocking.
 
 **Original code:**
 ```c
 void SensorTask(void *argument) {
     for (;;) {
         // Read DHT22, read LDR
-        // Send data to sensor_queue
-        vTaskDelay(pdMS_TO_TICKS(2000));  // <-- REMOVED
+        // Publish to sensor_queue and display_sensor_queue
+        vTaskDelayUntil(&xLastWakeTime, xPeriod);  // <-- REMOVED
     }
 }
 ```
@@ -27,41 +50,43 @@ void SensorTask(void *argument) {
 void SensorTask(void *argument) {
     for (;;) {
         // Read DHT22, read LDR
-        // Send data to sensor_queue
-        // vTaskDelay removed — task loops continuously
+        // Publish to the queues
+        // vTaskDelayUntil removed — task loops continuously
     }
 }
 ```
 
 ### What Happened
 
-1. **SensorTask monopolized the CPU.** Because SensorTask runs at priority 4 (osPriorityHigh), it never yielded and never blocked. The FreeRTOS scheduler could not dispatch any lower-priority task.
+1. **SensorTask monopolized the CPU.** SensorTask runs at priority 2, above DisplayTask (priority 1). Because it never yielded and never blocked, the scheduler could never dispatch the lower-priority DisplayTask.
 
 2. **DisplayTask starved.** The OLED display froze on the last rendered frame. No new sensor data appeared on screen.
 
-3. **InputTask starved.** The rotary encoder became completely unresponsive. Rotating the encoder had no visible effect.
+3. **InputTask was unaffected.** The rotary encoder kept working. InputTask runs at priority 3, above SensorTask (priority 2), so it still preempted the busy loop.
 
-4. **MotionTask starved.** Motion detection ceased. PIR events were not processed.
+4. **MotionTask was unaffected.** PIR events were still processed, for the same reason — MotionTask is also priority 3.
 
-5. **AlarmTask starved.** Temperature evaluation stopped. If an alarm condition had been active, it would have remained stuck.
+5. **AlarmTask kept running, but went stale.** AlarmTask shares priority 2 with SensorTask, and `configUSE_TIME_SLICING` is 1, so the two round-robin rather than one blocking the other. AlarmTask continued evaluating, but `xQueueReceive()` competes for CPU time with a task that overwrites the queue far faster than it can drain.
 
-6. **System appeared hung.** From the user's perspective, the system was non-functional — frozen display, no input response, no sensor updates.
+6. **SensorTask reported continuous DHT22 errors.** With no delay, a new single-wire transaction was issued every few milliseconds. The DHT22 requires at least 2 s between samples, so nearly every read timed out — a second, independent failure mode.
+
+7. **The display was the only fully dead subsystem.** From the user's perspective the system looked hung, but the encoder and PIR input still responded; only the screen was frozen.
 
 ### Why It Happened
 
-FreeRTOS uses a **preemptive priority-based scheduler**. When a task at priority 4 never blocks (no `vTaskDelay`, `xQueueReceive`, or other blocking call), it enters a **busy-wait loop** that consumes 100% of CPU time. Lower-priority tasks (priorities 2–3) are never scheduled because the scheduler only dispatches the highest-priority ready task.
+FreeRTOS uses a **preemptive priority-based scheduler**. When SensorTask never blocks (no `vTaskDelayUntil`, `xQueueReceive`, or other blocking call), it enters a **busy-wait loop** that consumes 100% of CPU time. Tasks at priority 1 are never scheduled because the scheduler only dispatches the highest-priority ready task; and because SensorTask never blocks on a queue, AlarmTask (priority 2) and DisplayTask never receive fresh samples at all.
 
-This is a classic example of **CPU starvation** caused by a non-yielding high-priority task. It is not a deadlock (no circular dependency), but rather a **livelock** where the busy task runs but the system makes no useful progress.
+This is **CPU starvation**, and specifically *priority-relative* starvation: only tasks strictly below SensorTask were denied CPU time. It is not a deadlock (no circular dependency); the busy task runs on, but the lowest-priority subsystem makes no progress.
 
 ### The Fix
 
 Restore the blocking delay:
 
 ```c
-vTaskDelay(pdMS_TO_TICKS(2000));
+vTaskDelayUntil(&xLastWakeTime, xPeriod);   /* xPeriod = pdMS_TO_TICKS(1000) */
 ```
 
-This yields the CPU every 2 seconds, allowing the scheduler to dispatch lower-priority tasks during the delay period. The delay is the critical mechanism that enables cooperative multitasking among same- or lower-priority tasks.
+This yields the CPU every 1000 ms, allowing the scheduler to dispatch lower-priority tasks for the remainder of the period. The delay is the critical mechanism that lets lower-priority work run at all.
 
 **Lesson learned:** Every FreeRTOS task must contain at least one blocking call (`vTaskDelay`, `xQueueReceive`, `xSemaphoreTake`, `xTaskNotifyWait`, etc.) to prevent CPU starvation.
 
@@ -71,51 +96,46 @@ This yields the CPU every 2 seconds, allowing the scheduler to dispatch lower-pr
 
 ### What Was Done
 
-DisplayTask priority was changed from `osPriorityNormal` (2) to `osPriorityRealtime` (6, the highest available priority), making it the highest-priority task in the system.
+DisplayTask priority was changed from 1 to 4, making it the highest-priority task in the system. (4 is the highest usable value: `configMAX_PRIORITIES` is 5, and priority 0 is reserved for the idle task.)
 
-**Original configuration:**
+DisplayTask is created with `xTaskCreate()` rather than a CMSIS-RTOS attribute struct.
+
+**Original call:**
 ```c
-osThreadAttr_t displayTask_attributes = {
-    .priority = osPriorityNormal,  // Priority 2
-    .stack_size = 512
-};
+xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
 ```
 
-**Modified configuration:**
+**Modified call:**
 ```c
-osThreadAttr_t displayTask_attributes = {
-    .priority = osPriorityRealtime,  // Priority 6 (highest)
-    .stack_size = 512
-};
+xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 4, NULL);
 ```
 
 ### What Happened
 
-1. **DisplayTask preempted SensorTask.** Because DisplayTask now runs at priority 6, it preempted SensorTask (priority 4) every 100 ms whenever its delay expired.
+1. **DisplayTask preempted SensorTask.** Because DisplayTask now runs at priority 4, it preempted both SensorTask and AlarmTask (both priority 2) every 100 ms whenever its delay expired.
 
-2. **SensorTask timing degraded.** The 2-second sampling period became irregular. Sensor readings were delayed by up to 500 ms because DisplayTask frequently preempted it during I2C communication with the OLED.
+2. **SensorTask timing degraded.** The 1-second sampling period became irregular. Because `vTaskDelayUntil` tracks absolute wake times, a preempted SensorTask still wakes late and its subsequent read is delayed further.
 
-3. **DHT22 read failures increased.** The DHT22 protocol requires precise microsecond timing during the single-wire read. While interrupts are disabled during the critical timing section, the increased preemption frequency caused more context switches before and after reads, leading to occasional timeout errors.
+3. **DHT22 read failures increased.** The DHT22 protocol requires precise microsecond timing during the single-wire transaction. Preemption cannot occur *inside* the timing-critical window (`taskENTER_CRITICAL()` masks it), but the higher-priority renderer repeatedly displaced SensorTask between the pin-mode change, the start pulse, and the read, and the extra context switches around the transaction widened the intervals enough to produce intermittent checksum timeouts.
 
-4. **Alarm response delayed.** Temperature evaluation in AlarmTask was delayed because DisplayTask (now higher priority) preempted AlarmTask (priority 4). The alarm activation lag increased from <50 ms to >200 ms.
+4. **Alarm response delayed.** Temperature evaluation in AlarmTask was delayed because DisplayTask (now higher priority) preempted AlarmTask (priority 2).
 
 5. **Display remained responsive.** The OLED updated smoothly at 10 Hz with no visible artifacts, but at the expense of sensor reliability.
 
 ### Why It Happened
 
-**Priority inversion by design:** When DisplayTask is elevated above SensorTask, the scheduler always favors display rendering over sensor acquisition. This violates the design principle that **safety-critical tasks (sensor reading, alarm evaluation) must have higher or equal priority to non-critical tasks (display rendering).**
+**Misaligned priorities:** when DisplayTask is elevated above SensorTask, the scheduler always favours display rendering over sensor acquisition. This is a **priority-assignment error, not priority inversion** in the classical sense — DisplayTask holds no resource that SensorTask needs, so there is no unbounded blocking, only preferential scheduling.
 
-The DHT22 timing sensitivity amplifies this issue — any preemption during the single-wire protocol window corrupts the read sequence.
+It does violate the design principle that *timing-sensitive tasks must outrank best-effort tasks*: the OLED refresh is purely cosmetic at 10 Hz, whereas a missed sensor sample delays alarm evaluation. The original assignment (SensorTask/AlarmTask at 2, DisplayTask at 1) encodes that judgement; note that it is a *relative* ordering only in that pair — the priority-3 InputTask and MotionTask sit above both because they are notification-driven and therefore consume no CPU while idle.
+
+The DHT22's sensitivity amplifies the effect: the single-wire transaction spans several milliseconds of setup and polling with only the innermost timing segment masked, so frequent preemption in the surrounding code degrades read reliability.
 
 ### The Fix
 
 Restore the original priority:
 
 ```c
-osThreadAttr_t displayTask_attributes = {
-    .priority = osPriorityNormal,  // Priority 2
-    .stack_size = 512
-};
+xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
 ```
 
 **Lesson learned:** Task priorities must reflect the **criticality and timing requirements** of each task. Display rendering is non-critical and should never preempt sensor acquisition or alarm evaluation.
@@ -126,19 +146,36 @@ osThreadAttr_t displayTask_attributes = {
 
 ### What Was Done
 
-All `xSemaphoreTake(uart_mutex, ...)` and `xSemaphoreGive(uart_mutex)` calls wrapping `printf` statements were removed, allowing multiple tasks to call `printf` concurrently without synchronization.
+The take/give pair inside the `UART_Mutex_Printf()` helper was removed, so every task transmitted directly to `huart1` without synchronization. (No task in this project calls `printf` directly — all output is routed through this helper.)
 
-**Original code:**
+**Original code** — `src/drivers/uart_mutex.c`:
 ```c
-xSemaphoreTake(uart_mutex, portMAX_DELAY);
-printf("[SensorTask] Temp: %.1f C, Hum: %.1f %%\r\n", temp, hum);
-xSemaphoreGive(uart_mutex);
+void UART_Mutex_Printf(UART_Mutex_t *uart_mutex, const char *format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    if (xSemaphoreTake(uart_mutex->mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        HAL_UART_Transmit(uart_mutex->huart, (uint8_t *)buffer, strlen(buffer), 100);
+        xSemaphoreGive(uart_mutex->mutex);
+    }
+}
 ```
 
-**Modified code:**
+**Modified code** — take/give pair deleted, so the helper degenerates to a bare transmit:
 ```c
-// Mutex removed — direct printf
-printf("[SensorTask] Temp: %.1f C, Hum: %.1f %%\r\n", temp, hum);
+void UART_Mutex_Printf(UART_Mutex_t *uart_mutex, const char *format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    /* mutex removed — transmit directly */
+    HAL_UART_Transmit(uart_mutex->huart, (uint8_t *)buffer, strlen(buffer), 100);
+}
 ```
 
 ### What Happened
@@ -169,15 +206,16 @@ This is a **race condition** on shared resources (the `printf` internal state an
 
 ### The Fix
 
-Restore the mutex:
+Restore the take/give pair inside the helper:
 
 ```c
-xSemaphoreTake(uart_mutex, portMAX_DELAY);
-printf("[SensorTask] Temp: %.1f C, Hum: %.1f %%\r\n", temp, hum);
-xSemaphoreGive(uart_mutex);
+    if (xSemaphoreTake(uart_mutex->mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        HAL_UART_Transmit(uart_mutex->huart, (uint8_t *)buffer, strlen(buffer), 100);
+        xSemaphoreGive(uart_mutex->mutex);
+    }
 ```
 
-**Lesson learned:** Any shared resource accessed by multiple tasks must be protected by a synchronization primitive (mutex, semaphore, or critical section). For UART output, a mutex ensures that each `printf` call completes atomically before another task can write.
+**Lesson learned:** Any shared resource accessed by multiple tasks must be protected by a synchronization primitive (mutex, semaphore, or critical section). Here the shared resource is the USART1 transmit stream, and the helper takes the mutex for the duration of the transmit so each log line stays intact.
 
 ---
 
@@ -185,8 +223,8 @@ xSemaphoreGive(uart_mutex);
 
 | Experiment | Fault Injected | Symptom | Root Cause | Fix |
 |------------|---------------|---------|------------|-----|
-| 1 | Remove SensorTask delay | CPU starvation; system hung | Non-yielding high-priority task | Restore `vTaskDelay` |
-| 2 | Elevate DisplayTask priority | Sensor delays; alarm lag | Priority inversion of critical tasks | Restore original priorities |
+| 1 | Remove SensorTask delay | CPU starvation; system hung | Non-yielding priority-2 task | Restore `vTaskDelayUntil` |
+| 2 | Elevate DisplayTask priority | Sensor delays; alarm lag | Priority misassignment (best-effort task outranking timing-critical ones) | Restore original priorities |
 | 3 | Remove UART mutex | Garbled serial output | Race condition on shared UART | Restore mutex protection |
 
 All three experiments validate the correctness of the original design decisions:

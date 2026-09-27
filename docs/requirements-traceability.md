@@ -10,141 +10,171 @@
 
 This matrix maps each functional requirement to its implementation (source files, functions, and data structures) and verification (unit tests and functional tests).
 
+> **Scope note.** Unit-test coverage in this project is limited to the two pure-logic modules — temperature threshold evaluation (`src/app/logic/temperature.c`) and the room-occupancy state machine (`src/app/logic/state_machine.c`) — plus the encoder page-navigation arithmetic. Requirements whose behaviour depends on STM32 peripherals (ADC, I²C, timers, EXTI) are verified functionally rather than by unit test. Test suites are host-compiled and transcribe the decision logic inline; they do not link against the production `.c` files.
+
 | Req ID | Requirement | Implementation | Verification | Status |
 |--------|-------------|----------------|--------------|--------|
-| FR-01 | Read temperature and humidity from DHT22 sensor | `src/drivers/dht22.c` — `DHT22_Read()`<br>`src/tasks/sensor_task.c` — `SensorTask()` | Unit: `test_temperature/test_temp_boundary.c` (14 tests)<br>Functional: FT-02 | VERIFIED |
-| FR-02 | Read ambient light level from LDR via ADC | `src/drivers/ldr.c` — `LDR_Read()`<br>`src/tasks/sensor_task.c` — `SensorTask()` | Unit: `test_temperature/test_temp_boundary.c` (ADC mock tests)<br>Functional: FT-03 | VERIFIED |
-| FR-03 | Detect motion via PIR sensor | `src/drivers/pir.c` — `PIR_Detect()`<br>`src/tasks/motion_task.c` — `MotionTask()` | Functional: FT-04 | VERIFIED |
-| FR-04 | Display sensor data and system state on SSD1306 OLED | `src/drivers/oled.c` — `OLED_Init()`, `OLED_Display()`, `OLED_Clear()`<br>`src/tasks/display_task.c` — `DisplayTask()` | Functional: FT-01, FT-02, FT-03, FT-04 | VERIFIED |
-| FR-05 | Navigate display pages using rotary encoder input | `src/drivers/encoder.c` — `Encoder_Read()`<br>`src/tasks/input_task.c` — `InputTask()`<br>`src/ipc/queues.c` — `display_page_queue` | Unit: `test_encoder/test_encoder_nav.c` (10 tests)<br>Functional: FT-05 | VERIFIED |
-| FR-06 | Evaluate temperature against thresholds and trigger buzzer alarm | `src/tasks/alarm_task.c` — `AlarmTask()`<br>`src/drivers/buzzer.c` — `Buzzer_On()`, `Buzzer_Off()`<br>`include/config/project_config.h` — `TEMP_THRESHOLD_HIGH`, `TEMP_THRESHOLD_LOW` | Unit: `test_temperature/test_temp_boundary.c` (14 tests)<br>Functional: FT-06, FT-07 | VERIFIED |
-| FR-07 | Maintain system state machine (ACTIVE / INACTIVE) | `src/tasks/alarm_task.c` — `SystemState` enum<br>`src/ipc/event_groups.c` — `event_group`<br>State transitions via `event_group` bits | Unit: `test_state_machine/test_sm_transitions.c` (9 tests)<br>Functional: FT-08, FT-09 | VERIFIED |
-| FR-08 | Guard shared UART resource with mutex for printf output | `src/ipc/mutexes.c` — `uart_mutex`<br>All tasks: `xSemaphoreTake(uart_mutex)` / `xSemaphoreGive(uart_mutex)` around `printf` | Functional: FT-10 (concurrent operation)<br>Fault Experiment 3 | VERIFIED |
-| FR-09 | Use event group for inter-task event signaling | `src/ipc/event_groups.c` — `event_group`<br>Bits: `EVT_MOTION`, `EVT_ENCODER`, `EVT_TEMP_UPDATE`<br>Producers: InputTask, MotionTask<br>Consumer: DisplayTask | Functional: FT-04 (EVT_MOTION), FT-05 (EVT_ENCODER) | VERIFIED |
-| FR-10 | Implement all tasks with correct FreeRTOS priorities | `src/main.c` — `osThreadNew()` calls<br>Task priorities: SensorTask(4), AlarmTask(4), InputTask(3), MotionTask(3), DisplayTask(2) | Unit: All tests run under correct priority schedule<br>Fault Experiment 2 (priority validation) | VERIFIED |
+| FR-01 | Read temperature and humidity from DHT22 sensor | `src/app/hal/dht22.c` — `DHT22_Init()`, `DHT22_Read()`<br>`src/app/tasks/sensor_task.c` — `SensorTask()` | Unit: `test/test_temperature/test_main.c` (15 tests — threshold evaluation)<br>Functional: FT-02 | VERIFIED |
+| FR-02 | Read ambient light level from LDR via ADC | `src/app/hal/ldr.c` — `LDR_Init()`, `LDR_Read()`, `LDR_GetValue()`<br>`src/app/tasks/sensor_task.c` — `SensorTask()` | Functional: FT-03 | VERIFIED |
+| FR-03 | Detect motion via PIR sensor | `src/app/hal/pir.c` — `PIR_Init()`, `PIR_GetState()`, `PIR_EXTI_Callback()`<br>`src/app/tasks/motion_task.c` — `MotionTask()` | Functional: FT-08 | VERIFIED |
+| FR-04 | Display sensor data and system state on SSD1306 OLED | `src/app/hal/oled.c` — `OLED_Init()`, `OLED_Clear()`, `OLED_Update()`, `OLED_DrawString()`, `OLED_DrawProgressBar()`<br>`src/app/tasks/display_task.c` — `DisplayTask()` | Functional: FT-01, FT-02, FT-03 | VERIFIED |
+| FR-05 | Navigate display pages using rotary encoder input | `src/app/hal/encoder.c` — `Encoder_Init()`, `Encoder_GetDelta()`, `Encoder_CLK_EXTI_Callback()`<br>`src/app/tasks/input_task.c` — `InputTask()`<br>`display_page_queue` — created in `src/main.c` | Unit: `test/test_encoder/test_main.c` (10 tests)<br>Functional: FT-04, FT-05 | VERIFIED |
+| FR-06 | Evaluate temperature against thresholds and trigger buzzer alarm | `src/main.h` — `TEMP_LOW_THRESHOLD` (18.0f), `TEMP_HIGH_THRESHOLD` (30.0f)<br>`src/app/logic/temperature.c` — `EvaluateTemperature()`, `Temperature_IsAlarm()`<br>`src/app/logic/alarm.c` — `Alarm_Update()`<br>`src/app/hal/buzzer.c` — `Buzzer_Play()`, `Buzzer_Stop()` | Unit: `test/test_temperature/test_main.c` (15 tests)<br>Functional: FT-06, FT-07 | VERIFIED |
+| FR-07 | Maintain system state machine (ACTIVE / INACTIVE) | `src/app/logic/state_machine.c` — `StateMachine_Update()`, `StateMachine_GetState()`<br>Driven from `src/app/tasks/alarm_task.c` — `AlarmTask()`<br>Read by `src/app/tasks/display_task.c` | Unit: `test/test_state_machine/test_main.c` (8 tests)<br>Functional: FT-09, FT-10 | VERIFIED |
+| FR-08 | Guard shared UART resource with mutex for printf output | `src/drivers/uart_mutex.c` — `UART_Mutex_Init()`, `UART_Mutex_Printf()`, `UART_Mutex_Send()`<br>All tasks call `UART_Mutex_Printf()` instead of bare `printf()` | Functional: FT-10 (concurrent operation)<br>Fault Experiment 3 | VERIFIED |
+| FR-09 | Use event group for inter-task event signaling | `event_group` — created in `src/main.c`<br>Bits (`src/main.h`): `MOTION_DETECTED_BIT`, `ENCODER_CW_BIT`, `ENCODER_CCW_BIT`, `ENCODER_BTN_BIT`<br>Producers: `InputTask`, `MotionTask`; Consumer: `DisplayTask` | Functional: FT-08 (motion bit), FT-04 / FT-05 (encoder bits) | VERIFIED |
+| FR-10 | Implement all tasks with correct FreeRTOS priorities | `src/main.c` — five `xTaskCreate()` calls<br>Priorities: InputTask(3), MotionTask(3), SensorTask(2), AlarmTask(2), DisplayTask(1); `configMAX_PRIORITIES` is 5 | Code review against `configUSE_PREEMPTION 1` / `configUSE_TIME_SLICING 1`<br>Fault Experiment 2 (priority validation) | VERIFIED |
 
 ---
 
 ## Requirement-to-Test Mapping Detail
 
-### FR-01: DHT22 Temperature/Humidity Reading
+### FR-01 / FR-06: Temperature Threshold Evaluation
 
 **Implementation:**
-- `DHT22_Read()` in `src/drivers/dht22.c` — Implements single-wire protocol with `DWT->CYCCNT` timing
-- `SensorTask()` in `src/tasks/sensor_task.c` — Calls `DHT22_Read()` every 2 seconds
-- Data structure: `SensorData_t` with `temperature` and `humidity` fields
+- `EvaluateTemperature()` in `src/app/logic/temperature.c` — pure comparison against `TEMP_LOW_THRESHOLD` (18.0f) and `TEMP_HIGH_THRESHOLD` (30.0f) from `src/main.h`
+- `Temperature_GetStatusString()` — maps `TempStatus_t` to `"LOW"` / `"NORMAL"` / `"HIGH"`
+- `Temperature_IsAlarm()` — returns true for any non-NORMAL status
+- `DHT22_Read()` in `src/app/hal/dht22.c` — single-wire protocol with microsecond delay loop
+- `SensorTask()` in `src/app/tasks/sensor_task.c` — calls `DHT22_Read()` every 1 s (`SENSOR_READ_PERIOD_MS`) via `vTaskDelayUntil()`
 
-**Unit Tests (14):**
+**Unit Tests (15)** — `test/test_temperature/test_main.c`:
+
 | Test | Description | Result |
 |------|-------------|--------|
-| `test_temp_above_high_threshold` | Temperature > 30 °C evaluates to ALARM | PASS |
-| `test_temp_below_low_threshold` | Temperature < 28 °C evaluates to NORMAL | PASS |
-| `test_temp_in_hysteresis_band` | Temperature between 28–30 °C maintains previous state | PASS |
-| `test_temp_exactly_at_high` | Temperature = 30.0 °C evaluates to ALARM | PASS |
-| `test_temp_exactly_at_low` | Temperature = 28.0 °C evaluates to NORMAL | PASS |
-| `test_temp_zero` | Temperature = 0 °C evaluates to NORMAL | PASS |
-| `test_temp_negative` | Temperature = -10 °C evaluates to NORMAL | PASS |
-| `test_temp_max_sensible` | Temperature = 60 °C evaluates to ALARM | PASS |
-| `test_temp_min_sensible` | Temperature = -40 °C evaluates to NORMAL | PASS |
-| `test_temp_rapid_change` | Rapid temp changes produce correct state transitions | PASS |
-| `test_temp_hysteresis_prevents_oscillation` | Temp at boundary does not toggle rapidly | PASS |
-| `test_temp_humidity_zero` | Humidity = 0% is handled | PASS |
-| `test_temp_humidity_100` | Humidity = 100% is handled | PASS |
-| `test_temp_humidity_invalid` | Humidity outside 0–100% is rejected | PASS |
+| `test_temp_below_low_boundary` | 17.9 °C → `TEMP_LOW` | PASS |
+| `test_temp_at_low_boundary` | 18.0 °C → `TEMP_NORMAL` (boundary is inclusive) | PASS |
+| `test_temp_just_above_low` | 18.1 °C → `TEMP_NORMAL` | PASS |
+| `test_temp_mid_normal` | 24.0 °C → `TEMP_NORMAL` | PASS |
+| `test_temp_at_high_boundary` | 30.0 °C → `TEMP_NORMAL` (boundary is inclusive) | PASS |
+| `test_temp_just_above_high` | 30.1 °C → `TEMP_HIGH` | PASS |
+| `test_temp_extreme_high` | 50.0 °C → `TEMP_HIGH` | PASS |
+| `test_temp_extreme_low` | −10.0 °C → `TEMP_LOW` | PASS |
+| `test_temp_zero` | 0.0 °C → `TEMP_LOW` | PASS |
+| `test_status_string_low` | `Temperature_GetStatusString(TEMP_LOW)` → `"LOW"` | PASS |
+| `test_status_string_normal` | `Temperature_GetStatusString(TEMP_NORMAL)` → `"NORMAL"` | PASS |
+| `test_status_string_high` | `Temperature_GetStatusString(TEMP_HIGH)` → `"HIGH"` | PASS |
+| `test_is_alarm_low` | `Temperature_IsAlarm(TEMP_LOW)` → true | PASS |
+| `test_is_alarm_normal` | `Temperature_IsAlarm(TEMP_NORMAL)` → false | PASS |
+| `test_is_alarm_high` | `Temperature_IsAlarm(TEMP_HIGH)` → true | PASS |
 
-**Functional Tests:** FT-02 (reading accuracy), FT-06 (alarm activation), FT-07 (alarm deactivation)
+**Note on hysteresis.** The implementation is deliberately *stateless*: the status is a pure function of the current reading, with no hysteresis band. Consequently the alarm re-asserts and clears at the same nominal boundary (30.0 °C) rather than at a lower release threshold. `test_temp_at_high_boundary` confirms 30.0 °C itself is not an alarm. See `docs/limitations.md` for the trade-off.
+
+**Functional Tests:** FT-02 (temperature reading), FT-06 (alarm activation), FT-07 (alarm deactivation)
 
 ---
 
 ### FR-05: Encoder Page Navigation
 
 **Implementation:**
-- `Encoder_Read()` in `src/drivers/encoder.c` — TIM3 hardware encoder interface
-- `InputTask()` in `src/tasks/input_task.c` — Polls encoder, sets `EVT_ENCODER` bit
-- `display_page_queue` — Carries `DisplayPage_t` from InputTask to DisplayTask
+- `Encoder_GetDelta()` in `src/app/hal/encoder.c` — consumes accumulated quadrature detents via EXTI callbacks
+- `InputTask()` in `src/app/tasks/input_task.c` — notification-driven; sets `ENCODER_CW_BIT` / `ENCODER_CCW_BIT` / `ENCODER_BTN_BIT` and posts to `display_page_queue`
+- `display_page_queue` — created in `src/main.c`; carries `DisplayPage_t`
+- `DisplayPage_t` enum (`src/main.h`): `PAGE_TEMPERATURE`, `PAGE_HUMIDITY`, `PAGE_LIGHT`, `PAGE_MOTION`, `PAGE_COUNT`
 
-**Unit Tests (10):**
+**Unit Tests (10)** — `test/test_encoder/test_main.c`:
+
 | Test | Description | Result |
 |------|-------------|--------|
-| `test_encoder_single_increment` | One CW rotation advances page by 1 | PASS |
-| `test_encoder_single_decrement` | One CCW rotation decrements page by 1 | PASS |
-| `test_encoder_wrap_around_max` | Page wraps from max to 0 | PASS |
-| `test_encoder_wrap_around_min` | Page wraps from 0 to max | PASS |
-| `test_encoder_no_movement` | No rotation produces no page change | PASS |
-| `test_encoder_bounce_filter` | Rapid toggles are filtered (debounce) | PASS |
-| `test_encoder_multiple_rotations` | Multiple detents advance page correctly | PASS |
-| `test_encoder_page_count` | Total page count matches PAGE_COUNT | PASS |
-| `test_encoder_initial_page` | System starts on page 0 | PASS |
-| `test_encoder_concurrent_access` | Encoder read is ISR-safe | PASS |
+| `test_encoder_initial_position` | Position starts at 0 | PASS |
+| `test_encoder_increment_once` | One CW detent advances position by 1 | PASS |
+| `test_encoder_increment_twice` | Two CW detents advance by 2 | PASS |
+| `test_encoder_increment_three_times` | Three CW detents advance by 3 | PASS |
+| `test_encoder_wrap_around_cw` | Position wraps from max to 0 | PASS |
+| `test_encoder_decrement_once` | One CCW detent decrements position by 1 | PASS |
+| `test_encoder_wrap_around_ccw` | Position wraps from 0 to max | PASS |
+| `test_encoder_full_cycle_cw` | Full CW cycle returns to origin | PASS |
+| `test_encoder_full_cycle_ccw` | Full CCW cycle returns to origin | PASS |
+| `test_encoder_mixed_operations` | Mixed CW/CCW sequence yields correct net position | PASS |
 
-**Functional Tests:** FT-05 (page navigation)
+**Functional Tests:** FT-04 (CW navigation), FT-05 (CCW navigation and wrap-around)
 
 ---
 
 ### FR-07: System State Machine
 
 **Implementation:**
-- `SystemState` enum: `STATE_INACTIVE`, `STATE_ACTIVE`
-- `event_group` bits: `EVT_START`, `EVT_STOP`, `EVT_TEMP_HIGH`
-- State transitions in `AlarmTask()` and `InputTask()`
+- `SystemState_t` enum (`src/app/logic/state_machine.h`): `STATE_ACTIVE`, `STATE_INACTIVE`
+- `StateMachine_Update(sm, motion_detected)` in `src/app/logic/state_machine.c` — initialises to `STATE_ACTIVE`; any motion resets the timeout and forces `STATE_ACTIVE`; `STATE_ACTIVE` decays to `STATE_INACTIVE` once `INACTIVE_TIMEOUT_MS` (15000) has elapsed with no motion
+- `StateMachine_GetState()` — read by `DisplayTask()` to gate OLED output
+- `StateMachine_Update()` is called from **`AlarmTask()`** (`src/app/tasks/alarm_task.c`) using the sensor queue's `motion_detected` field, not from `MotionTask()`
 
-**Unit Tests (9):**
+**Unit Tests (8)** — `test/test_state_machine/test_main.c`:
+
 | Test | Description | Result |
 |------|-------------|--------|
-| `test_sm_initial_state` | System starts in INACTIVE | PASS |
-| `test_sm_start_command` | START transitions INACTIVE → ACTIVE | PASS |
-| `test_sm_stop_command` | STOP transitions ACTIVE → INACTIVE | PASS |
-| `test_sm_stop_when_inactive` | STOP in INACTIVE has no effect | PASS |
-| `test_sm_start_when_active` | START in ACTIVE has no effect | PASS |
-| `test_sm_temp_high_activates_alarm` | Temperature > threshold triggers alarm mode | PASS |
-| `test_sm_temp_low_deactivates_alarm` | Temperature < threshold clears alarm mode | PASS |
-| `test_sm_reset` | Reset returns to INACTIVE | PASS |
-| `test_sm_full_cycle` | Complete ACTIVE → ALARM → INACTIVE cycle | PASS |
+| `test_state_initial_active` | Initialises to `STATE_ACTIVE` | PASS |
+| `test_state_stays_active_on_motion` | Motion while ACTIVE keeps ACTIVE | PASS |
+| `test_state_resets_timeout_on_motion` | Motion refreshes `last_motion_tick` | PASS |
+| `test_state_transitions_to_inactive` | No motion for the timeout → `STATE_INACTIVE` | PASS |
+| `test_state_stays_inactive_without_motion` | INACTIVE is stable with no motion | PASS |
+| `test_state_returns_to_active_on_motion` | Motion from INACTIVE → ACTIVE | PASS |
+| `test_state_continuous_motion_keeps_active` | Repeated motion never expires | PASS |
+| `test_state_alternating_motion` | Alternating motion/timeout cycles behave correctly | PASS |
 
-**Functional Tests:** FT-08 (START command), FT-09 (STOP command)
+**Functional Tests:** FT-09 (entry to INACTIVE after 15 s), FT-10 (return to ACTIVE on motion)
+
+---
+
+### FR-08: UART Mutual Exclusion
+
+**Implementation:**
+- `src/drivers/uart_mutex.c` — `UART_Mutex_Init()` creates a FreeRTOS mutex (`configUSE_MUTEXES 1`); `UART_Mutex_Printf()` formats into a **task-local** `char buffer[256]` with `vsnprintf()` and then takes the mutex only around `HAL_UART_Transmit()`
+- Because the format buffer is local to the caller, the mutex protects the **USART1 transmit stream**, not a shared format buffer
+- Every task uses `UART_Mutex_Printf()`; there are no bare `printf()` calls in `src/`
+
+**Verification:** FT-10 (all five tasks running concurrently for an extended period with no garbled or interleaved output) and Fault Experiment 3.
 
 ---
 
 ## Verification Coverage Summary
 
-| Req ID | Unit Tests | Functional Tests | Fault Experiments | Total Coverage |
+| Req ID | Unit Tests | Functional Tests | Fault Experiments | Coverage Basis |
 |--------|-----------|------------------|-------------------|----------------|
-| FR-01 | 14 | 1 | — | Comprehensive |
-| FR-02 | — | 1 | — | Adequate |
-| FR-03 | — | 1 | — | Adequate |
-| FR-04 | — | 3 | — | Adequate |
-| FR-05 | 10 | 1 | — | Comprehensive |
-| FR-06 | 14 | 2 | — | Comprehensive |
-| FR-07 | 9 | 2 | — | Comprehensive |
-| FR-08 | — | 1 | 1 | Adequate |
-| FR-09 | — | 2 | — | Adequate |
-| FR-10 | — | 1 | 1 | Adequate |
-| **Total** | **47** | **15** | **2** | **All verified** |
+| FR-01 | 15 (threshold logic) | 1 | — | Unit + functional |
+| FR-02 | — | 1 | — | Functional only (ADC hardware) |
+| FR-03 | — | 1 | — | Functional only (EXTI hardware) |
+| FR-04 | — | 3 | — | Functional only (I²C hardware) |
+| FR-05 | 10 | 2 | — | Unit + functional |
+| FR-06 | 15 (shared with FR-01) | 2 | — | Unit + functional |
+| FR-07 | 8 | 2 | — | Unit + functional |
+| FR-08 | — | 1 | 1 | Functional + fault experiment |
+| FR-09 | — | 2 | — | Functional only (scheduler-dependent) |
+| FR-10 | — | 1 | 1 | Code review + fault experiment |
+| **Total** | **33** | **10** | **2** | |
+
+The 33 unit tests are the sum of the three suites (15 + 10 + 8); the temperature suite is counted once against FR-01 and once against FR-06 because it exercises both the sensor-evaluation and alarm-decision paths.
 
 ---
 
 ## Traceability to Static Analysis
 
-| Requirement | Static Analysis Findings | Impact |
-|-------------|--------------------------|--------|
-| FR-01 | SA-06, SA-45 (unused param, include order) | None — style only |
-| FR-02 | SA-44, SA-46 (include order) | None — style only |
-| FR-03 | SA-47 (include order) | None — style only |
-| FR-04 | SA-44, SA-48 (include order) | None — style only |
-| FR-05 | SA-49 (include order) | None — style only |
-| FR-06 | SA-10, SA-80, SA-96, SA-97 (unused param, naming, magic number) | None — false positives |
-| FR-07 | SA-01–SA-05 (unused callback params) | None — API requirement |
-| FR-08 | — | No findings |
-| FR-09 | SA-107 (macro side effect) | None — literal usage |
-| FR-10 | SA-01–SA-05 (unused callback params) | None — API requirement |
+Static analysis (see `docs/static-analysis.md`) reported **zero functional defects** and **20 LOW-severity clang-tidy advisories**, plus one compiler sign-compare warning. The advisories are confined to two files, so they do not map onto all ten requirements:
+
+| Requirement | Relevant Findings | Impact |
+|-------------|-------------------|--------|
+| FR-01 / FR-06 | `cert-err33-c` in `display_task.c` — the `snprintf` result that formats the temperature is discarded (3 total) | None — buffer is 32 bytes and the formatted value is bounded |
+| FR-02 | None | — |
+| FR-03 | None | — |
+| FR-04 | `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `oled.c`, plus the sign-compare warning at `oled.c:49` | None — coordinates are bounded by 128×64; the loop bound cannot overflow |
+| FR-05 | None | — |
+| FR-07 | None | — |
+| FR-08 | None in `src/drivers/uart_mutex.c` | — |
+| FR-09 | None | — |
+| FR-10 | None | — |
+
+The concentration of findings in the two display modules, and their absence everywhere else, is itself a useful result: the task, queue, mutex, and state-machine code is free of analyzer complaints.
 
 ---
 
 ## Conclusion
 
-All 10 functional requirements (FR-01 through FR-10) are fully implemented and verified through a combination of:
-- **47 unit tests** covering boundary conditions, state transitions, and navigation logic
-- **15 functional tests** verifying end-to-end system behavior on hardware
-- **2 fault experiments** validating design decisions (priority scheme, mutex protection)
+All 10 functional requirements (FR-01 through FR-10) are implemented. Verification is asymmetric by design:
 
-The system meets all specified requirements with comprehensive test coverage and zero static analysis defects.
+- **33 unit tests** cover the pure decision logic — temperature threshold evaluation (15), encoder page arithmetic (10), and the occupancy state machine (8)
+- **10 functional tests** cover end-to-end behaviour, including the four requirements whose behaviour depends on STM32 peripherals and therefore cannot be unit-tested on a host
+- **3 fault experiments** (see `docs/fault-experiments.md`) exercise the blocking delay, the priority scheme, and the UART mutex
+
+Static analysis reported **no functional defects** — every one of the 21 observations is an advisory in the display path.
+
+Limitations and known gaps are recorded in `docs/limitations.md`.
