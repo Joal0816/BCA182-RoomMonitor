@@ -253,6 +253,43 @@ The schematic below is generated directly from `diagram.json` and shows all 9 co
    - Click the PIR sensor to trigger simulated motion
    - Observe the OLED display render 4 distinct pages and view real-time serial output in the terminal
 
+#### Verifying a Build End to End
+
+Wokwi never compiles the firmware — it loads whatever `pio run` last produced. A stale or unpatched binary therefore looks exactly like a firmware bug. Run these steps in order.
+
+**1. Clean rebuild.**
+
+```bash
+pio run -t clean && pio run
+```
+
+**2. Confirm the port workaround is in the image.** The build log must contain:
+
+```
+[port-patch] OK: patched ARM_CM3 port.o is in the image
+```
+
+If it instead prints `[port-patch] WARNING: ... was NOT compiled`, the Wokwi `cpsie` workaround is missing and the first task will not start. A `multiple definition` link error is the *intended* loud failure and means the patch did not shadow the stock port — see [docs/limitations.md](docs/limitations.md) L-07.
+
+**3. Start the simulator** as described in Option 1 above.
+
+**4. Open the Serial Monitor tab.** This is a separate tab in the Wokwi panel, next to the diagram view. If it is closed, the firmware can be printing perfectly and you will still see nothing.
+
+**5. Let it run for at least 15 seconds.** The scheduler starts first and the tasks stagger in afterwards; judging the run in the first two seconds is misleading.
+
+**6. Read the result.**
+
+| Observation | Meaning |
+|-------------|---------|
+| `[TASK] DisplayTask entered` and the OLED shows `Initializing...` within ~1 s | Working. The `svc` was not masked. |
+| `[TASK] SensorTask entered` and `[SENSOR] T=25.0C H=50.0% L=500 M=0` | Working, and the float formatter is linked. |
+| Only the two `[MAIN]` lines, then silence | The `svc` is still masked — the port workaround is not in the image. Recheck step 2. |
+| `[OLED] init failed: no ACK from 0x3C` | The panel is not acknowledging. A wiring or simulator fault, not a software one. |
+| `[SENSOR] T=0.0C H=0.0%` or garbage digits | The `%f` formatter is not linked; check `-Wl,-u,_printf_float` in `platformio.ini`. |
+| Serial monitor completely empty | The monitor tab is almost certainly closed. Recheck step 4. |
+
+The onboard LED should stay **off** throughout. It is wired active-low and PC13 is driven HIGH at boot, so a lit LED at rest indicates a wiring error rather than normal operation.
+
 ### Option 2: Physical Hardware Validation
 The same firmware binary (`.pio/build/bluepill_f103c8/firmware.bin`) can be flashed to an STM32F103C8T6 Blue Pill board via ST-Link V2 using `pio run -e bluepill_f103c8 -t upload`.
 
