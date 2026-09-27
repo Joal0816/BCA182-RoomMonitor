@@ -27,19 +27,26 @@
 
 extern void xPortSysTickHandler(void);
 
-/* Strong override of the startup file's `bl SystemInit`.  The framework's copy
-   compiles to a bare `bx lr`, so nothing in the boot path has ever programmed
-   VTOR and it keeps its reset value of 0.  That is invisible on any part whose
-   flash is aliased to address 0 -- which is exactly what tieing BOOT0 low
-   selects on a real Blue Pill -- but where the alias is absent the core reads
-   the vector table from unmapped memory, which on a Cortex-M3 presents as a
-   hard fault taken before the first instruction of main() runs.  Symptom: a
-   dead board with no UART output and a blank OLED.
-
-   Reset_Handler reaches this before the .data copy and .bss clear, so it must
-   not depend on an initialised or zeroed static.  It assigns into a file-scope
-   pointer (held in .bss), which a C-store zeroes for us, and reads nothing. */
-void SystemInit(void) {
+/* Point VTOR at the vector table at 0x08000000.
+ *
+ * This cannot be done by defining a function named SystemInit(): the startup
+ * file's `bl SystemInit` resolves against the STM32Cube framework's
+ * system_stm32f1xx.c, whose SystemInit is a plain strong definition (not
+ * __attribute__((weak))), so a same-named definition here is a duplicate
+ * symbol at link time.  The framework's copy compiles to a bare `bx lr`, so
+ * nothing in the boot path has ever programmed VTOR and it keeps its reset
+ * value of 0.  That is invisible on any part whose flash is aliased to
+ * address 0 -- which is exactly what tieing BOOT0 low selects on a real Blue
+ * Pill -- but where the alias is absent the core reads the vector table from
+ * unmapped memory, which on a Cortex-M3 presents as a hard fault taken before
+ * the first instruction of main() runs.  Symptom: a dead board with no UART
+ * output and a blank OLED.
+ *
+ * Calling it from main() instead of from Reset_Handler is safe: the only
+ * consumer of VTOR is the FreeRTOS Cortex-M port, which validates the SVCall
+ * and PendSV slots in xPortStartScheduler() -- long after main() has started.
+ * The relocation therefore still precedes every read of the vector table. */
+static void App_RelocateVectors(void) {
     Diag_RelocateVectors();
 }
 
@@ -79,6 +86,7 @@ static TIM_HandleTypeDef htim4;
 static UART_HandleTypeDef huart1;
 
 int main(void) {
+    App_RelocateVectors();
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();

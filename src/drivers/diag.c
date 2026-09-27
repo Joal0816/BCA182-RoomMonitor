@@ -212,8 +212,10 @@ void Diag_RelocateVectors(void)
        the reference implementation this project was compared against does
        (SCB->VTOR = FLASH_BASE before app_main()).
 
-       Runs before main(), so it does its own address latching rather than
-       depending on the caller having called Diag_Init() first. */
+       Runs at the top of main(), before HAL_Init() and long before
+       xPortStartScheduler() reads the table, so it does its own address
+       latching rather than depending on the caller having called Diag_Init()
+       first. */
     Diag_Init();
     Diag_CaptureVectorTable();
     Diag_ProgramVectorTable();

@@ -475,45 +475,42 @@ The static analysis confirms that the production code is free of detectable func
 
 ### 7.1 Resource Utilization
 
-> **Scope of these figures.** The whole-image totals below were measured on the
-> revision that last completed a full PlatformIO build. That build predates the
-> diagnostic instrumentation added afterwards (section 7.5), which contributes a
-> further 1,216 B of `.text` and 36 B of `.bss` in `src/drivers/diag.c`, and it
-> predates the `-Wl,-u,_printf_float` link flag, which pulls the newlib float
-> formatter into the image at a cost of just under 3 KB. The build directory has
-> since been cleaned, so the linked ELF those numbers came from no longer exists
-> and they cannot be re-derived here. They are quoted as the last measured
-> whole-image baseline, not as the current totals. The application-only figures
-> further down this subsection **were** re-measured against the current source and
-> are current.
+> **Scope of these figures.** The whole-image totals below are current: they were
+> re-measured with `pio run -e bluepill_f103c8` against the present source, which
+> includes the diagnostic instrumentation of section 7.5 (`src/drivers/diag.c`)
+> and the `-Wl,-u,_printf_float` link flag that pulls the newlib float formatter
+> into the image. They supersede the pre-instrumentation baseline of 15,384 B RAM
+> / 26,308 B Flash that earlier revisions quoted. The application-only figures
+> further down this subsection are produced by a separate clang pass and are also
+> current.
 
 | Resource | Used | Available | Utilization |
 |----------|------|-----------|-------------|
-| RAM | 15,384 bytes | 20,480 bytes | 75.1% |
-| Flash | 26,308 bytes | 65,536 bytes | 40.1% |
+| RAM | 15,792 bytes | 20,480 bytes | 77.1% |
+| Flash | 36,252 bytes | 65,536 bytes | 55.3% |
 
-RAM usage (75.1%) is within acceptable limits but leaves only ~5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 79.9% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,028-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,053 B. Flash usage (40.1%) leaves ample space for additional features.
+RAM usage (77.1%) is within acceptable limits but leaves only ~4.5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 77.8% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,028-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,053 B. Flash usage (55.3%) leaves ample space for additional features; the increase over the pre-instrumentation baseline is almost entirely the newlib float formatter pulled in by `-Wl,-u,_printf_float` (just under 3 KB) plus the diagnostic instrumentation.
 
-**Provenance.** Both figures are reproduced directly from a PlatformIO build of the revision described in the scope note above. The block is quoted verbatim from that build's output:
+**Provenance.** Both figures are reproduced directly from a PlatformIO build of the current revision. The block is quoted verbatim from that build's output:
 
 ```
 $ pio run -e bluepill_f103c8
-RAM:   [========  ]  75.1% (used 15384 bytes from 20480 bytes)
-Flash: [====      ]  40.1% (used 26308 bytes from 65536 bytes)
+RAM:   [========  ]  77.1% (used 15792 bytes from 20480 bytes)
+Flash: [======    ]  55.3% (used 36252 bytes from 65536 bytes)
 ```
 
-They were confirmed at the time against the linked ELF with `size -A` / `nm`, which is the authoritative source because it measures the artifact that is actually flashed rather than the linker's summary:
+They were confirmed against the linked ELF with `size -A` / `nm`, which is the authoritative source because it measures the artifact that is actually flashed rather than the linker's summary:
 
 | ELF section | Size | Contributes to |
 |-------------|------|----------------|
-| `.text` | 25,008 B | Flash |
-| `.rodata` | 1,180 B | Flash |
-| `.data` | 120 B | Flash **and** RAM |
-| `.bss` | 15,264 B | RAM |
+| `.text` | 33,032 B | Flash |
+| `.rodata` | 2,732 B | Flash |
+| `.data` | 488 B | Flash **and** RAM |
+| `.bss` | 15,304 B | RAM |
 
-Flash = `.text + .rodata + .data` = **26,308 B**; RAM = `.data + .bss` = **15,384 B**. The RAM total reconciles exactly with its principal consumers: 2,569 B of application statics + 12,288 B FreeRTOS heap + 407 B of kernel and CMSIS-RTOS statics + 120 B of initialised data.
+Flash = `.text + .rodata + .data` = **36,252 B**; RAM = `.data + .bss` = **15,792 B**. The RAM total reconciles with its principal consumers: 2,458 B of application statics + 12,288 B FreeRTOS heap + 407 B of kernel and CMSIS-RTOS statics + 488 B of initialised data, plus the remaining vendor statics.
 
-**Accounting note on the Flash figure.** The 26,308 B total is PlatformIO's flash metric, which counts code and initialised data but excludes the interrupt vector table and the C runtime initialisation arrays. Those occupy a further 276 B — `.isr_vector` 268 B, `.init_array` 4 B, `.fini_array` 4 B — so the image actually written to flash, `firmware.bin`, is **26,584 B (40.6%)**. Both figures are correct; they measure slightly different things. The smaller number is used in the table above because it is the one PlatformIO reports, and it is the convention used throughout this report. The 276 B difference does not affect any conclusion: at 40.6% the design still has more than half of flash free.
+**Accounting note on the Flash figure.** The 36,252 B total is PlatformIO's flash metric, which counts code and initialised data but excludes the interrupt vector table and the C runtime initialisation arrays. Those occupy a further 280 B — `.isr_vector` 268 B, `.init_array` 4 B, `.fini_array` 4 B, plus alignment — so the image actually written to flash, `firmware.bin`, is **36,532 B (55.7%)**. Both figures are correct; they measure slightly different things. The smaller number is used in the table above because it is the one PlatformIO reports, and it is the convention used throughout this report. The difference does not affect any conclusion: at 55.7% the design still has more than 40% of flash free.
 
 **Application-only figures (re-measured).** `tools/verify/run_size_analysis.sh` compiles every `.c` file under `src/` for Cortex-M3 and reports the application's own contribution separately from the vendor code. Run against the current source it reports:
 
@@ -528,7 +525,7 @@ Flash = `.text + .rodata + .data` = **26,308 B**; RAM = `.data + .bss` = **15,38
 
 The remainder of the image is the STM32Cube HAL drivers and the FreeRTOS kernel. These figures are produced by clang's built-in ARM target rather than `arm-none-eabi-gcc`, so they are not byte-identical to what the real toolchain emits — `libc`'s `__main`/`system` shims and the exact HAL code paths differ — but they are a faithful *relative* indicator of where the application's own bytes go, and unlike the whole-image totals above they are reproducible from the current tree with a single command. The two largest application objects are `src/main.c` (1,526 B `.text`, 1,396 B `.bss`) and `src/drivers/diag.c` (1,216 B `.text`, 36 B `.bss`). The OLED driver contributes 1,124 B of `.text` and 500 B of `.rodata` — the latter being the 25-byte init sequence table plus the 5×7 font — and 1,025 B of `.bss` for the bulk-transfer buffer.
 
-**Correction notice.** Earlier revisions of this report stated RAM = 14,356 B (70.1%) and Flash = 26,304 B (40.1%). Those figures were accurate when they were taken, but the firmware changed afterwards in two commits — `9d0d056` (queue fan-out fix: split a shared `sensor_queue` into independent `alarm_sensor_queue` and `display_sensor_queue`) and `647b343` (OLED bulk-transfer fix: replaced 1,024 individual I2C transactions with a single 1,025-byte transmission, adding the `tx_buf` static buffer). The sizes were never re-measured after those fixes, so the report understated RAM by **1,028 B** and Flash by **4 B**. The whole-image table above is the corrected, re-measured result. The 1,028 B difference is almost entirely the `oled` driver instance growing to accommodate the framebuffer alongside the new transfer buffer; the FreeRTOS heap and all task stacks are unchanged. RAM headroom is therefore smaller than originally reported — 25% rather than 30% — which is worth noting for any future feature work, though still comfortable for this scope.
+**Correction notice.** Earlier revisions of this report stated RAM = 14,356 B (70.1%) and Flash = 26,304 B (40.1%). Those figures were accurate when they were taken, but the firmware changed afterwards in two commits — `9d0d056` (queue fan-out fix: split a shared `sensor_queue` into independent `alarm_sensor_queue` and `display_sensor_queue`) and `647b343` (OLED bulk-transfer fix: replaced 1,024 individual I2C transactions with a single 1,025-byte transmission, adding the `tx_buf` static buffer). The sizes were never re-measured after those fixes, so the report understated RAM by **1,028 B** and Flash by **4 B**. A later revision corrected those to RAM = 15,384 B (75.1%) and Flash = 26,308 B (40.1%), which was itself superseded by the diagnostic instrumentation of section 7.5 and the `-Wl,-u,_printf_float` link flag. The whole-image table above is the current, re-measured result. The 1,028 B step is almost entirely the `oled` driver instance growing to accommodate the framebuffer alongside the new transfer buffer; the FreeRTOS heap and all task stacks are unchanged. RAM headroom is therefore smaller than originally reported — 23% rather than 30% — which is worth noting for any future feature work, though still comfortable for this scope.
 
 ### 7.2 Limitations
 
@@ -588,7 +585,7 @@ This was the defect that actually produced the reported symptom, and it was the 
 - **Clock configuration.** The two `[MAIN]` lines are legible at 115200 baud. That single observation proves both that the HSE oscillator started and the PLL locked at 72 MHz, and that the PCLK2-derived UART divisor is correct. A clock failure would have routed into the inlined `Error_Handler()` before any output appeared at all.
 - **Heap exhaustion.** `configTOTAL_HEAP_SIZE` is 12,288 B against a measured demand of roughly 10.0–10.2 KB, leaving about 2 KB of headroom, and `vTaskStartScheduler()` returning on failure would have been caught by the post-scheduler guard added in section 7.5.
 - **Interrupt priority assertions.** The ISRs that call `...FromISR` are EXTI2/EXTI4 at HAL priority 5 and EXTI0 at priority 6, both at or below the `configMAX_SYSCALL_INTERRUPT_PRIORITY` ceiling of raw `0x50`, and the port's own AIRCR priority-group check passes because the STM32F103 implements 4 priority bits. An earlier hypothesis that a SysTick priority assertion was trapping the boot was investigated and **refuted**: `xPortStartScheduler()` explicitly ORs `0xFF` over the SysTick priority byte to force it to the lowest priority, so the value it asserts on is the one it just wrote.
-- **Vector table relocation.** The framework's `SystemInit()` is compiled down to a bare `bx lr` — disassembly of `FrameworkCMSISDevice/system_stm32f1xx.o` shows the entire function body is the two bytes `4770` — so nothing in the stock boot path ever programs `VTOR`, which keeps its reset value of 0. A scan of the linked image finds the `0xE000ED08` literal in exactly two places, both of them loads inside the FreeRTOS port, and no store to it anywhere. This is a real latent defect, because FreeRTOS V11 defaults `configCHECK_HANDLER_INSTALLATION` to 1 and the check it performs reads the vector table *through* `VTOR` to confirm that vectors 11 and 14 are the port's own SVC and PendSV handlers. On a Blue Pill with BOOT0 tied low, address 0 aliases flash, so the check passes by luck; where that alias is absent the core would fetch the table from unmapped memory. It is fixed by the strong `SystemInit()` override described in section 7.5, but it is **not** the cause of the observed symptom, because the alias is present in the simulator.
+- **Vector table relocation.** The framework's `SystemInit()` is compiled down to a bare `bx lr` — disassembly of `FrameworkCMSISDevice/system_stm32f1xx.o` shows the entire function body is the two bytes `4770` — so nothing in the stock boot path ever programs `VTOR`, which keeps its reset value of 0. A scan of the linked image finds the `0xE000ED08` literal in exactly two places, both of them loads inside the FreeRTOS port, and no store to it anywhere. This is a real latent defect, because FreeRTOS V11 defaults `configCHECK_HANDLER_INSTALLATION` to 1 and the check it performs reads the vector table *through* `VTOR` to confirm that vectors 11 and 14 are the port's own SVC and PendSV handlers. On a Blue Pill with BOOT0 tied low, address 0 aliases flash, so the check passes by luck; where that alias is absent the core would fetch the table from unmapped memory. It is fixed by the explicit relocation described in section 7.5, but it is **not** the cause of the observed symptom, because the alias is present in the simulator.
 
 *Root cause.* The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` ends with a sequence that clears the interrupt masks and then issues the supervisor call that starts the first task:
 
@@ -643,7 +640,9 @@ Three additions address this.
 
 **A fault handler that reports.** `src/drivers/diag.c` installs a `HardFault_Handler` that decodes the stacked exception frame and prints the fault status registers over USART1. It writes to `USART1->DR` directly through a latched register pointer rather than calling `UART_Mutex_Printf()`, because the latter takes a mutex and would deadlock in a fault context — a fault handler cannot assume the scheduler is running or that any lock is free. The handler reads `CFSR`, `HFSR`, `MMFAR`, and `BFAR` to distinguish a precise data-access fault from an imprecise one, and selects the correct stack pointer by testing bit 2 of the link register to determine whether the fault occurred in handler or thread mode. It is declared `naked` so the compiler does not emit a prologue that would corrupt the frame it is trying to read.
 
-**A vector table that is actually relocated.** As described in Challenge 4, the framework's `SystemInit()` is a bare `bx lr` and nothing in the stock boot path programs `VTOR`. The project now defines a strong `SystemInit()` that calls `Diag_RelocateVectors()`, which writes `FLASH_BASE` to `VTOR` before `main()` runs. This is required for the FreeRTOS V11 handler-installation check to read the table it intends to read, and it is what the reference implementation does as well.
+**A vector table that is actually relocated.** As described in Challenge 4, the framework's `SystemInit()` is a bare `bx lr` and nothing in the stock boot path programs `VTOR`. The project now calls `Diag_RelocateVectors()` from the top of `main()`, which writes `FLASH_BASE` to `VTOR` before `HAL_Init()` and therefore before the scheduler starts. This is required for the FreeRTOS V11 handler-installation check to read the table it intends to read, and it is what the reference implementation does as well.
+
+The relocation deliberately does **not** take the form of a function named `SystemInit()`. That was the first attempt, and it does not link: the startup file's `bl SystemInit` resolves against the STM32Cube framework's `system_stm32f1xx.c`, whose `SystemInit` is a plain strong definition rather than `__attribute__((weak))`, so a same-named definition in `src/main.c` is a duplicate symbol at link time (`multiple definition of 'SystemInit'`). The framework's copy cannot be overridden by name, only shadowed at the object level. Calling the relocation from `main()` instead is functionally equivalent for this design: the only consumer of `VTOR` is the FreeRTOS Cortex-M port, which validates the SVCall and PendSV slots in `xPortStartScheduler()` — long after `main()` has started — so the relocation still precedes every read of the vector table. The one property that is lost is that the write no longer happens before the C runtime copies `.data` and clears `.bss`; that is harmless here because `Diag_RelocateVectors()` writes a constant to a fixed MMIO address and reads no initialised state.
 
 **A boot path that reports its own failure.** `main()` now captures the return code of each `xTaskCreate()` call and prints a fatal message if any of them fails, and prints a second fatal message if `vTaskStartScheduler()` returns — which it can do on heap exhaustion. Previously both conditions were silent. Each of the five task entry points also prints a banner on entry, so the serial log shows exactly how far the scheduler got.
 

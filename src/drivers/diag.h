@@ -16,7 +16,9 @@
 /* Latch the register addresses.  Call once, after MX_USART1_UART_Init(). */
 void Diag_Init(void);
 
-/* Point VTOR at the vector table at 0x08000000.  Call from SystemInit(). */
+/* Point VTOR at the vector table at 0x08000000.  Call from main() before
+   HAL_Init(); see the comment at the call site for why this cannot be done
+   from a SystemInit() override. */
 void Diag_RelocateVectors(void);
 
 /* Print VTOR and the SVCall/PendSV entries it resolves to.  The FreeRTOS port
