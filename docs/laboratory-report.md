@@ -88,6 +88,11 @@ All peripherals except PIR operate at 3.3V. PIR supply uses the 5V rail. The I2C
 
 The ST-Link V2 connects to the 4-pin SWD header (`3V3 / SWDIO / SWCLK / GND`) at the end of the board opposite the USB connector, with the optional `RST` line wired to `NRST`. Only `3.3V` and `GND` are used for reference; the ST-Link `5V` pin is left unconnected. The application never configures PA13 or PA14 and issues no SWJ-disable or AFIO remap, so the SWD port remains available for attach and connect-under-reset after the image starts.
 
+<figure>
+<img src="wiring-diagram.png" alt="Wokwi wiring diagram: STM32F103C8T6 with DHT22, LDR, PIR, SSD1306 OLED, rotary encoder, buzzer and serial monitor">
+<figcaption><strong>Figure 2.1</strong> &mdash; System wiring as defined by <code>diagram.json</code> and rendered directly from it. Net labels are the Wokwi pin names used by the simulator (for example <code>A9</code>, <code>A10</code>, <code>3V3.1</code>).</figcaption>
+</figure>
+
 ### 2.2 Software Architecture
 
 The application follows a modular three-layer architecture:
