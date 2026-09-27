@@ -211,7 +211,7 @@ src/
 ### Static Analysis
 - **0 HIGH** severity findings
 - **0 MEDIUM** severity findings
-- **0 functional defects**, **20 LOW** severity clang-tidy advisories, plus **1** compiler sign-compare warning (all advisory — no corrective action required)
+- **0 functional defects**, **21 LOW** severity clang-tidy advisories, plus **1** compiler sign-compare warning and **1** benign memory-mapped-register finding (all advisory — no corrective action required)
 
 ### Functional Verification (10 tests)
 All 10 functional tests pass, covering temperature display, humidity display, light display, encoder navigation (CW/CCW), alarm activation/deactivation, and state machine transitions.

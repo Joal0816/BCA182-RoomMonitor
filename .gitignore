@@ -1,1 +1,4 @@
 .pio
+
+# clang static-analyzer artifacts
+*.plist

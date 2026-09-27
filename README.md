@@ -298,11 +298,25 @@ pio test -e native
 pio check
 ```
 
-**Results:** 0 functional defects, 20 LOW-severity advisory findings (plus 1 compiler sign-compare warning).
+**Results:** 0 functional defects, 21 LOW-severity clang-tidy advisories (plus 1 compiler sign-compare warning and 1 benign memory-mapped-register finding).
 
-The advisories are `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `src/app/hal/oled.c`, and `cert-err33-c` (3) in `src/app/tasks/display_task.c` for deliberately discarded bounded `snprintf` return values. No correctness or safety issue was detected. `pio check` delegates to `cppcheck`; the findings above were produced with `clang-tidy`.
+The advisories are `bugprone-narrowing-conversions` (10) and `bugprone-easily-swappable-parameters` (7) in `src/app/hal/oled.c`, `cert-err33-c` (3) in `src/app/tasks/display_task.c`, and `cert-err33-c` (1) in `src/drivers/uart_mutex.c` — all for deliberately discarded bounded `snprintf`/`vsnprintf` return values. One further static-analyzer finding, `core.FixedAddressDereference` on the CMSIS `CoreDebug` register block, is a direct memory-mapped peripheral access and not a defect. No correctness or safety issue was detected. `pio check` delegates to `cppcheck`; the findings above were produced with `clang-tidy`.
 
 See [docs/static-analysis.md](docs/static-analysis.md) for complete findings table.
+
+### Reproduce These Results Locally
+
+The `tools/verify/` harness re-runs the analysis above without PlatformIO or the
+vendor ARM toolchain, using only `gcc`, `clang`, `clang-tidy` and `python3`:
+
+```bash
+./tools/verify/run_tests.sh           # 33/33 native unit tests
+./tools/verify/run_static_analysis.sh # 0 defects, 21 advisories, 1 warning, 1 benign MMIO finding
+./tools/verify/run_size_analysis.sh   # cross-compile src/ for Cortex-M3 and report section sizes
+```
+
+See [tools/verify/README.md](tools/verify/README.md) for what the harness covers and
+what it deliberately does not.
 
 ---
 

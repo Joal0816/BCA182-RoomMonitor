@@ -2,7 +2,7 @@
 
 **Tools:** LLVM clang-tidy 22.1.8, clang static analyzer (LLVM 22.1.8), `clang -Wall -Wextra`  
 **Target:** STM32F103C8T6 + FreeRTOS application sources  
-**Scope:** 15 application `.c` files — `src/app/hal/` (6), `src/app/logic/` (3), `src/app/tasks/` (5), `src/drivers/` (1). `src/main.c` is excluded from this pass because it depends on STM32CubeMX-generated peripheral initialisation that is not reproducible outside the vendor toolchain.  
+**Scope:** all 16 `.c` files under `src/` — `src/app/hal/` (6), `src/app/logic/` (3), `src/app/tasks/` (5), `src/drivers/` (1), plus `src/main.c`.  
 **Date:** September 2026  
 **Codebase:** STM32F103C8T6 + FreeRTOS HAL application
 
@@ -14,12 +14,14 @@
 |----------|-------|--------|
 | HIGH | 0 | None |
 | MEDIUM | 0 | None |
-| LOW | 20 | Style / defensive-coding advisories — no corrective action required |
+| LOW | 22 | Style / defensive-coding advisories — no corrective action required |
 
-**Total findings:** 20  
+**Total findings:** 22  
 **Functional defects:** 0
 
-Analysis was performed in three passes. The **clang static analyzer** — the pass whose purpose is detecting genuine defects such as null dereferences, dead stores, use-after-free, and buffer overruns — reported **zero findings** across all 15 translation units. Every finding listed below comes from the lower-severity `bugprone-*` and `cert-*` advisory checks, which flag stylistic and defensive-coding patterns rather than defects.
+Analysis was performed in three passes. The **clang static analyzer** produced exactly one finding — `core.FixedAddressDereference` on the CMSIS `CoreDebug` register block in `src/app/hal/dht22.c:51`. That is a direct access to a memory-mapped peripheral register, which is how embedded code addresses hardware; it is reported here for completeness and is **not** a defect. Every remaining finding comes from the lower-severity `bugprone-*` and `cert-*` advisory checks, which flag stylistic and defensive-coding patterns rather than defects.
+
+**Reproduce this yourself:** `tools/verify/run_static_analysis.sh` re-runs all three passes and prints the counts. See `tools/verify/README.md`.
 
 ---
 
@@ -47,7 +49,7 @@ for f in $(find src/app src/drivers -name '*.c'); do
 done
 ```
 
-Only findings located within project sources (`src/`) are counted; findings arising from the stub headers themselves were excluded.
+Only findings located within project sources (`src/`) are counted; findings arising from the stub headers themselves were excluded (the stub's own `__aeabi_*` and register helpers would otherwise add 14 `cert-dcl37-c` naming advisories that have nothing to do with the application). `-Wunused-function` is suppressed for the compiler pass, because replacing the HAL with stubs makes every callback that the real vector table would call appear unreferenced.
 
 ---
 
@@ -84,17 +86,18 @@ All 10 occur inside `OLED_DrawLine()` in `src/app/hal/oled.c` (lines 112–132),
 
 ---
 
-### 3. Unchecked Return Values — 3 findings
+### 3. Unchecked Return Values — 4 findings
 
 All three occur in `src/app/tasks/display_task.c` at lines 19, 32, and 43 — the `snprintf()` calls that format the temperature, humidity, and light-level strings into a local `char buf[32]`.
 
-| Line | Message |
-|------|---------|
-| 19 | return value of `snprintf` disregarded (`cert-err33-c`) |
-| 32 | return value of `snprintf` disregarded (`cert-err33-c`) |
-| 43 | return value of `snprintf` disregarded (`cert-err33-c`) |
+| Location | Message |
+|----------|---------|
+| `display_task.c:19` | return value of `snprintf` disregarded (`cert-err33-c`) |
+| `display_task.c:32` | return value of `snprintf` disregarded (`cert-err33-c`) |
+| `display_task.c:43` | return value of `snprintf` disregarded (`cert-err33-c`) |
+| `uart_mutex.c:15` | return value of `vsnprintf` disregarded (`cert-err33-c`) |
 
-**Interpretation:** `snprintf()` truncates rather than overflows, so the buffer cannot be overrun. The formatted values are a float to one decimal place (`"%.1f C"`), a float (`"%.1f %%"`), and a 12-bit integer (`"%d"`) — the widest possible output is well inside 32 bytes.
+**Interpretation:** `snprintf()` and `vsnprintf()` truncate rather than overflow, so neither buffer can be overrun. The three `display_task.c` format strings (`"%.1f C"`, `"%.1f %%"`, `"%d"`) write at most a few bytes into a `char buf[32]`. The fourth, in `UART_Mutex_Printf()`, formats into `char buffer[256]`; the only call sites pass short literal prefixes such as `"[FATAL] Stack overflow in task: %s"` with a task name of at most `configMAX_TASK_NAME_LEN` characters, so the 256-byte bound is never approached.
 
 **Status:** Accepted, with the following caveat recorded for completeness: the return value *would* matter if a format string could grow. A defensive `(void)` cast documents the deliberate discard. Not corrected, because the maximum output length is bounded by the format strings and the value ranges.
 
@@ -131,10 +134,10 @@ For completeness, the following were checked and produced **nothing** in this co
 
 | Pass | Findings | Functional defects |
 |------|----------|-------------------|
-| clang static analyzer | 0 | 0 |
-| clang-tidy (`bugprone-*`, `cert-*`) | 20 | 0 |
+| clang static analyzer | 1 | 0 |
+| clang-tidy (`bugprone-*`, `cert-*`) | 21 | 0 |
 | `clang -Wall -Wextra` | 1 | 0 |
 
-**No functional defect was detected.** No data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store was reported by the defect-oriented analyzer pass. All 20 advisory findings are confined to `src/app/hal/oled.c` (drawing arithmetic and parameter shape) and `src/app/tasks/display_task.c` (deliberate discard of bounded `snprintf` results).
+**No functional defect was detected.** No data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store was reported. The single analyzer finding is the benign memory-mapped register access described above. The 21 advisory findings are confined to `src/app/hal/oled.c` (10 narrowing conversions + 7 easily-swappable parameters = 17), `src/app/tasks/display_task.c` (3 deliberately discarded `snprintf` results), and `src/drivers/uart_mutex.c` (1 deliberately discarded `vsnprintf` result).
 
 The `platformio.ini` `build_flags` do not currently enable `-Wall -Wextra`; the warning above was obtained by running the compiler with those flags explicitly and is recorded here for transparency. No remediation is required for correctness.

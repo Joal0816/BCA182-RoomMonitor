@@ -149,7 +149,7 @@ The 33 unit tests are the sum of the three suites (15 + 10 + 8); the temperature
 
 ## Traceability to Static Analysis
 
-Static analysis (see `docs/static-analysis.md`) reported **zero functional defects** and **20 LOW-severity clang-tidy advisories**, plus one compiler sign-compare warning. The advisories are confined to two files, so they do not map onto all ten requirements:
+Static analysis (see `docs/static-analysis.md`) reported **zero functional defects** and **21 LOW-severity clang-tidy advisories**, plus one compiler sign-compare warning and one benign memory-mapped-register finding. The advisories are confined to three files, so they do not map onto all ten requirements:
 
 | Requirement | Relevant Findings | Impact |
 |-------------|-------------------|--------|
@@ -175,6 +175,6 @@ All 10 functional requirements (FR-01 through FR-10) are implemented. Verificati
 - **10 functional tests** cover end-to-end behaviour, including the four requirements whose behaviour depends on STM32 peripherals and therefore cannot be unit-tested on a host
 - **3 fault experiments** (see `docs/fault-experiments.md`) exercise the blocking delay, the priority scheme, and the UART mutex
 
-Static analysis reported **no functional defects** — every one of the 21 observations is an advisory in the display path.
+Static analysis reported **no functional defects** — every one of the 23 observations is an advisory or a benign memory-mapped register access, and all are confined to the display and UART-print path.
 
 Limitations and known gaps are recorded in `docs/limitations.md`.

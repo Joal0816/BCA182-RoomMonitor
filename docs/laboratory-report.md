@@ -427,7 +427,7 @@ No finding indicates a data race, null dereference, buffer overflow, memory leak
 
 ### 6.4 Interpretation
 
-The static analysis confirms that the production code is free of detectable functional defects. All 21 findings are advisory. Twenty come from `clang-tidy`: 17 concern the OLED drawing module's parameter shape and coordinate arithmetic, and 3 concern deliberately discarded `snprintf` return values whose worst case is bounded truncation rather than overflow. The remaining one is the `-Wall -Wextra` sign-compare warning in the same drawing module. Two files account for everything; the task, queue, mutex, and state-machine code produced no findings under any pass.
+The static analysis confirms that the production code is free of detectable functional defects. All 23 findings are advisory or benign. Twenty-one come from `clang-tidy`: 17 concern the OLED drawing module's parameter shape and coordinate arithmetic, and 4 concern deliberately discarded `snprintf`/`vsnprintf` return values whose worst case is bounded truncation rather than overflow. One is the `-Wall -Wextra` sign-compare warning in the same drawing module, and one is the static analyzer's `FixedAddressDereference` on the CMSIS `CoreDebug` register block — a direct memory-mapped peripheral access, which is how embedded code addresses hardware rather than a defect. Three files account for everything; the task, queue, mutex, and state-machine code produced no functional findings under any pass.
 
 **Framework-dependency caveat.** Every pass was run against a hand-written stub header set rather than the vendor sources: the analysis environment has no STM32Cube or FreeRTOS package available (and no system C library headers). The stub headers declare the HAL and FreeRTOS symbols with plausible signatures so the translation units parse, but any defect that depends on the *real* macro expansion or the real API contract would be invisible to this pass. The stub is therefore an approximation of the interface, not a verification of it. This is recorded as an evidence limit, not a code defect; see `docs/limitations.md`.
 
@@ -444,7 +444,16 @@ The static analysis confirms that the production code is free of detectable func
 
 RAM usage (70.1%) is within acceptable limits but leaves limited headroom for additional features. The largest RAM consumer is the FreeRTOS heap (12 KB configured), which holds task stacks, queue storage, and synchronization objects. Flash usage (40.1%) leaves ample space for additional features.
 
-**Provenance:** these figures are reported by the PlatformIO build summary (`pio run -e bluepill_f103c8`). The vendor ARM toolchain is not available in the environment used to audit this document, so the values could not be independently re-measured and are reproduced as reported. The 12 KB heap (`configTOTAL_HEAP_SIZE` in `src/FreeRTOSConfig.h`) was verified directly against the source and is consistent with the RAM total.
+**Provenance and partial re-measurement.** These figures came from the PlatformIO build summary (`pio run -e bluepill_f103c8`) and are reproduced as reported: the vendor ARM toolchain and the STM32Cube/FreeRTOS sources are not available in the environment used to audit this document, so the same number cannot be reproduced exactly. What *was* re-measured is the size of the application's own translation units, cross-compiled for Cortex-M3 with clang's built-in ARM target (`tools/verify/run_size_analysis.sh`):
+
+| Component | Measured | Notes |
+|-----------|----------|-------|
+| Application code (`.text`) | 5,808 B | 16 `.c` files under `src/` |
+| Application read-only data (`.rodata`) | 487 B | includes the font table and format strings |
+| Application static RAM (`.bss`) | 2,417 B | 1,025 B of which is the 128×64 OLED framebuffer |
+| FreeRTOS heap | 12,288 B | `configTOTAL_HEAP_SIZE`, verified against `src/FreeRTOSConfig.h` |
+
+Application `.bss` (2,417 B) plus the FreeRTOS heap (12,288 B) accounts for 14,705 B of the reported 14,356 B — a difference of about 3%. The residual is explained by the vendor HAL's own static state (`hi2c1`, `hadc1`, `htim4`, `huart1`, `SystemCoreClock`), which lives in the STM32Cube library rather than in `src/` and is therefore not measured by the script above. The reported RAM figure is consistent with these measurements; the flash figure could not be checked at all, because the vendor HAL and the FreeRTOS kernel together contribute several times more code than the application itself.
 
 ### 7.2 Limitations
 
@@ -495,7 +504,7 @@ The BCA182 Room Monitoring System successfully demonstrates a production-quality
 - All 10 functional requirements (FR-01 through FR-10) are implemented and verified
 - 33 automated unit tests pass on the native host PC (hardware-independent)
 - All 10 Wokwi functional checks pass (WF-01 through WF-10), covering the same behaviour as the FT-01 through FT-10 procedures in `docs/functional-verification.md`
-- Static analysis found 0 functional defects across all passes; 20 LOW-severity clang-tidy advisories and 1 compiler warning were reviewed and accepted
+- Static analysis found 0 functional defects across all passes; 21 LOW-severity clang-tidy advisories, 1 compiler warning, and 1 benign memory-mapped-register finding were reviewed and accepted
 - 3 fault experiments validated the design decisions (blocking delays, priority ordering, mutex protection)
 - The Wokwi simulation runs with full UART serial output and OLED display rendering
 
