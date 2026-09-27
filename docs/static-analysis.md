@@ -109,7 +109,7 @@ All three occur in `src/app/tasks/display_task.c` at lines 19, 32, and 43 — th
 |----------|---------|
 | `src/app/hal/oled.c:49` | `comparison of integers of different signs: 'int' and 'size_t'` |
 
-`OLED_Clear()` iterates with `for (int i = 0; i < sizeof(oled->buffer); i++)` comparing a signed loop counter against the unsigned `sizeof`. The buffer is 1026 bytes, far below `INT_MAX`.
+`OLED_Clear()` iterates with `for (int i = 0; i < sizeof(oled->buffer); i++)` comparing a signed loop counter against the unsigned `sizeof`. The buffer is 1,024 bytes (`OLED_WIDTH * OLED_HEIGHT / 8` = 128 × 64 / 8), far below `INT_MAX`.
 
 **Status:** Accepted. Strictly, the loop counter should be `size_t`; the signed type is safe here but the warning is legitimate.
 

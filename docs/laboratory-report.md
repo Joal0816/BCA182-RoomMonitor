@@ -421,7 +421,7 @@ Because PlatformIO is not available in the analysis environment, the vendor-supp
 | Narrowing conversions | 10 | `oled.c` lines 112–132 | Bresenham accumulator mixes `int` and `int16_t`. Implementation-defined only if the value leaves `int16_t` range, which cannot happen for coordinates bounded by the 128×64 panel. | None — advisory only. |
 | Easily-swappable parameters | 7 | `oled.c` — `OLED_SetPixel`, `OLED_DrawChar`, `OLED_DrawLine`, `OLED_FillRect`, `OLED_DrawProgressBar` | Conventional graphics signatures such as `(x, y, w, h, color)`. All call sites are in one file and pass named arguments. | None — `Point`/`Rect` structs would obscure the drawing code. |
 | Unchecked `snprintf` return | 3 | `display_task.c` lines 19, 32, 43 | `snprintf` truncates rather than overflows. Widest output is a one-decimal float or a 12-bit integer into a 32-byte buffer. | None — output length is bounded by the format strings. |
-| Signed/unsigned comparison | 1 | `oled.c:49` | `int` loop counter compared against the unsigned `sizeof` of a 1,026-byte buffer. | None — safe; `size_t` would be strictly more correct. |
+| Signed/unsigned comparison | 1 | `oled.c:49` | `int` loop counter compared against the unsigned `sizeof` of a 1,024-byte buffer. | None — safe; `size_t` would be strictly more correct. |
 
 No finding indicates a data race, null dereference, buffer overflow, memory leak, uninitialised read, or dead store. Notably, the FreeRTOS callback unused-parameter warnings and the include-order/naming/magic-number warnings commonly reported in embedded projects did **not** appear under this check set.
 
@@ -439,21 +439,33 @@ The static analysis confirms that the production code is free of detectable func
 
 | Resource | Used | Available | Utilization |
 |----------|------|-----------|-------------|
-| RAM | 14,356 bytes | 20,480 bytes | 70.1% |
-| Flash | 26,304 bytes | 65,536 bytes | 40.1% |
+| RAM | 15,384 bytes | 20,480 bytes | 75.1% |
+| Flash | 26,308 bytes | 65,536 bytes | 40.1% |
 
-RAM usage (70.1%) is within acceptable limits but leaves limited headroom for additional features. The largest RAM consumer is the FreeRTOS heap (12 KB configured), which holds task stacks, queue storage, and synchronization objects. Flash usage (40.1%) leaves ample space for additional features.
+RAM usage (75.1%) is within acceptable limits but leaves only ~5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 79.9% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,028-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,053 B. Flash usage (40.1%) leaves ample space for additional features.
 
-**Provenance and partial re-measurement.** These figures came from the PlatformIO build summary (`pio run -e bluepill_f103c8`) and are reproduced as reported: the vendor ARM toolchain and the STM32Cube/FreeRTOS sources are not available in the environment used to audit this document, so the same number cannot be reproduced exactly. What *was* re-measured is the size of the application's own translation units, cross-compiled for Cortex-M3 with clang's built-in ARM target (`tools/verify/run_size_analysis.sh`):
+**Provenance.** Both figures are reproduced directly from a PlatformIO build of this exact revision:
 
-| Component | Measured | Notes |
-|-----------|----------|-------|
-| Application code (`.text`) | 5,808 B | 16 `.c` files under `src/` |
-| Application read-only data (`.rodata`) | 487 B | includes the font table and format strings |
-| Application static RAM (`.bss`) | 2,417 B | 1,025 B of which is the 128×64 OLED framebuffer |
-| FreeRTOS heap | 12,288 B | `configTOTAL_HEAP_SIZE`, verified against `src/FreeRTOSConfig.h` |
+```
+$ pio run -e bluepill_f103c8
+RAM:   [========  ]  75.1% (used 15384 bytes from 20480 bytes)
+Flash: [====      ]  40.1% (used 26308 bytes from 65536 bytes)
+```
 
-Application `.bss` (2,417 B) plus the FreeRTOS heap (12,288 B) accounts for 14,705 B of the reported 14,356 B — a difference of about 3%. The residual is explained by the vendor HAL's own static state (`hi2c1`, `hadc1`, `htim4`, `huart1`, `SystemCoreClock`), which lives in the STM32Cube library rather than in `src/` and is therefore not measured by the script above. The reported RAM figure is consistent with these measurements; the flash figure could not be checked at all, because the vendor HAL and the FreeRTOS kernel together contribute several times more code than the application itself.
+They are confirmed independently against the linked ELF with `size -A` / `nm`, which is the authoritative source because it measures the artifact that is actually flashed rather than the linker's summary:
+
+| ELF section | Size | Contributes to |
+|-------------|------|----------------|
+| `.text` | 25,008 B | Flash |
+| `.rodata` | 1,180 B | Flash |
+| `.data` | 120 B | Flash **and** RAM |
+| `.bss` | 15,264 B | RAM |
+
+Flash = `.text + .rodata + .data` = **26,308 B**; RAM = `.data + .bss` = **15,384 B**. The RAM total reconciles exactly with its principal consumers: 2,569 B of application statics + 12,288 B FreeRTOS heap + 407 B of kernel and CMSIS-RTOS statics + 120 B of initialised data.
+
+For reference, the application's own translation units (16 `.c` files under `src/`) contribute 6,718 B of Flash and 2,569 B of RAM as measured by the real toolchain; the remainder is the STM32Cube HAL drivers and the FreeRTOS kernel. `tools/verify/run_size_analysis.sh` reproduces the application-only breakdown from clang's built-in ARM target and reports slightly smaller figures (`libc`'s `__main`/`system` shims and the exact HAL code paths differ between clang and `arm-none-eabi-gcc`), so it is a useful *relative* indicator of where the application's own bytes go, but the `pio run` and `size -A` numbers above are the authoritative ones.
+
+**Correction notice.** Earlier revisions of this report stated RAM = 14,356 B (70.1%) and Flash = 26,304 B (40.1%). Those figures were accurate when they were taken, but the firmware changed afterwards in two commits — `9d0d056` (queue fan-out fix: split a shared `sensor_queue` into independent `alarm_sensor_queue` and `display_sensor_queue`) and `647b343` (OLED bulk-transfer fix: replaced 1,024 individual I2C transactions with a single 1,025-byte transmission, adding the `tx_buf` static buffer). The sizes were never re-measured after those fixes, so the report understated RAM by **1,028 B** and Flash by **4 B**. The table above is the corrected, re-measured result. The 1,028 B difference is almost entirely the `oled` driver instance growing to accommodate the framebuffer alongside the new transfer buffer; the FreeRTOS heap and all task stacks are unchanged. RAM headroom is therefore smaller than originally reported — 25% rather than 30% — which is worth noting for any future feature work, though still comfortable for this scope.
 
 ### 7.2 Limitations
 
