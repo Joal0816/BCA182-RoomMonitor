@@ -266,7 +266,7 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 1. **`vTaskDelayUntil()` vs `vTaskDelay()`:** `vTaskDelay()` introduces accumulated drift over time equal to task execution duration. `vTaskDelayUntil()` calculates delays relative to the scheduled start time, ensuring zero cumulative drift for periodic sensing.
 2. **IPC Mechanism Selection:** Using a mutex for UART output prevents race conditions and interleaved text. Using an event group allows atomic multi-event signaling (motion, rotation, button press) without polling.
 3. **Queue Ownership:** Multi-consumer architectures require dedicated queues per consumer or a broadcast/overwrite design rather than a single shared FIFO queue.
-4. **Hardware Abstraction Layer (HAL) Isolation:** Decoupling decision logic (`src/app/logic/`) from peripheral drivers (`src/app/hal/`) enables comprehensive native unit testing on host PCs (33/33 tests passed in CI without target hardware).
+4. **Hardware Abstraction Layer (HAL) Isolation:** Decoupling decision logic (`src/app/logic/`) from peripheral drivers (`src/app/hal/`) enables comprehensive native unit testing on host PCs (33/33 tests pass without target hardware).
 
 ---
 
