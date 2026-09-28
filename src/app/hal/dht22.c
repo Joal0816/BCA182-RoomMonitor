@@ -17,18 +17,32 @@
    least 1 ms; the sensor answers 20-40 us after the line is released. */
 #define DHT22_START_LOW_MS 2U
 
-/* Timeout bound for any single level of the reply: 80 us for each of the two
-   response pulses, and 50 us low plus 26/70 us high per bit.  This is a bound,
-   not an expected value, so it is deliberately generous -- it must still
-   outlast a reply when the firmware's idea of the CPU clock (SystemCoreClock)
-   and the rate DWT->CYCCNT actually advances at disagree, which is exactly the
-   case on simulators that model the core clock and the RCC separately. */
+/* Timeout bound for the handshake levels, which are waited for before the reply
+   has given the driver a scale to measure against.  This is a bound, not an
+   expected value, so it is deliberately generous: it must still outlast the
+   80 us response pulses when SystemCoreClock understates the counter's real
+   rate -- the case on a simulator whose core runs at the board's nominal clock
+   regardless of the RCC prescalers the firmware programmed. */
 #define DHT22_EDGE_US 1000U
 
 /* Width of the sensor's response high pulse.  It is a fixed part of the
    protocol, so the driver times it and divides by this to learn how many
    counter cycles a microsecond really is. */
 #define DHT22_RESPONSE_HIGH_US 80U
+
+/* Bound for the per-bit waits, which run once the scale has been measured and
+   so are expressed in genuine microseconds.  The longest level inside a bit is
+   the 70 us high pulse; the margin keeps the worst case -- a sensor that stalls
+   mid-frame while SysTick is masked -- short. */
+#define DHT22_BIT_EDGE_US 200U
+
+/* Plausible range for the measured scale, in counter cycles per microsecond.
+   A single glitch-stretched response pulse would otherwise inflate the scale
+   and bias every bit towards "0", so a measurement outside this range is
+   discarded and the nominal scale kept.  8 covers the slowest STM32F1 setting
+   (HSI 8 MHz); 144 covers the fastest plausible core. */
+#define DHT22_MIN_CYCLES_PER_US 8U
+#define DHT22_MAX_CYCLES_PER_US 144U
 
 /* A data bit is a 26-28 us high pulse for "0" and 70 us for "1".  Measuring the
    high pulse and comparing it against the midpoint (48 us) does not depend on
@@ -146,15 +160,21 @@ static void DHT22_Delay_us(uint32_t us) {
    bound for all of them.  The cycle budget is compared as an unsigned
    difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
    time rather than a huge one and cannot end the wait early. */
+/* Counter-cycle budget for the wait in progress.  It is kept at file scope
+   rather than passed to DHT22_WaitLevel so that function keeps a single
+   integer parameter -- two adjacent integers of convertible type read as
+   swappable.  The handshake installs a nominal-scale budget; the bit loop
+   replaces it with one derived from the measured scale. */
+static uint32_t s_wait_budget = 0U;
+
 static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high) {
     if (DHT22_CycleCounterReady()) {
-        uint32_t budget = DHT22_UsToCycles(DHT22_EDGE_US);
         uint32_t start = DWT->CYCCNT;
         for (;;) {
             if (DHT22_IsHigh(dht) == high) {
                 return 1U;
             }
-            if ((DWT->CYCCNT - start) > budget) {
+            if ((DWT->CYCCNT - start) > s_wait_budget) {
                 return 0U;
             }
         }
@@ -215,6 +235,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint8_t measure = DHT22_CycleCounterReady();
     /* Nominal scale, replaced below by one measured from the reply itself. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
+    /* The handshake runs before the reply can be timed, so it uses the nominal
+       scale; the bit loop installs the measured one before it starts. */
+    s_wait_budget = DHT22_EDGE_US * cycles_per_us;
 
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
@@ -241,8 +264,10 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             return DHT22_TIMEOUT;
         }
         uint32_t response_cycles = DWT->CYCCNT - rise;
-        if (response_cycles >= DHT22_RESPONSE_HIGH_US) {
-            cycles_per_us = response_cycles / DHT22_RESPONSE_HIGH_US;
+        uint32_t measured = response_cycles / DHT22_RESPONSE_HIGH_US;
+        if (measured >= DHT22_MIN_CYCLES_PER_US &&
+            measured <= DHT22_MAX_CYCLES_PER_US) {
+            cycles_per_us = measured;
         }
     } else if (!DHT22_WaitLow(dht)) {
         taskEXIT_CRITICAL();
@@ -252,6 +277,10 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     if (cycles_per_us == 0U) {
         cycles_per_us = 1U;
     }
+
+    /* The scale is now measured, so the per-bit bound is a genuine number of
+       microseconds rather than a nominal one. */
+    s_wait_budget = DHT22_BIT_EDGE_US * cycles_per_us;
 
     for (int i = 0; i < 40; i++) {
         /* Rising edge: end of the 50 us low pulse that opens every bit. */

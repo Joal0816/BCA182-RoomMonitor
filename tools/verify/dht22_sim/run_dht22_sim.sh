@@ -25,7 +25,7 @@ SRC="$ROOT/src"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
-EXPECTED=14
+EXPECTED=15
 INC=(-I"$SIM" -I"$STUB" -I"$SHIM" -I"$SRC" -I"$SRC/app" -I"$SRC/app/hal")
 
 # dht22.c gets the DWT/CoreDebug redirection; every other unit compiles plainly.

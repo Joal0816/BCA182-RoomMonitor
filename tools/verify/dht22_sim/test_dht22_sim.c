@@ -10,6 +10,9 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+    /* A test may move SystemCoreClock to model a mis-identified clock; restore
+       the nominal rate so the next test starts from the normal case. */
+    SystemCoreClock = 72000000U;
 }
 
 /* Encode one sensor frame the way the DHT22 does: humidity and temperature are
@@ -164,6 +167,25 @@ void test_read_recovers_after_timeout(void) {
     TEST_ASSERT_EQUAL(24.0f, DHT22_GetTemperature(&dht));
 }
 
+/* The firmware can believe it runs at one clock while the counter advances at
+ * another: Wokwi drives the core at the board's nominal 72 MHz whatever RCC
+ * prescalers the firmware programmed, so a build that ends up on the 8 MHz HSI
+ * fallback sees SystemCoreClock and the counter disagree by 9x.  The decode
+ * must take its scale from the reply, not from SystemCoreClock, or every bit
+ * reads as a 1 and the checksum fails. */
+void test_read_decodes_when_counter_rate_disagrees_with_system_clock(void) {
+    uint8_t d[5];
+    make_frame(d, 650U, 0, 240U); /* 65.0 %RH, 24.0 C */
+    sim_load_bytes(d);
+
+    SystemCoreClock = 8000000U;         /* firmware thinks the core is 8 MHz */
+    sim_set_counter_cycles_per_us(72U); /* the counter really ticks at 72 MHz */
+
+    TEST_ASSERT_EQUAL(DHT22_OK, DHT22_Read(&dht));
+    TEST_ASSERT_EQUAL(65.0f, DHT22_GetHumidity(&dht));
+    TEST_ASSERT_EQUAL(24.0f, DHT22_GetTemperature(&dht));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_read_decodes_temperature_and_humidity);
@@ -180,5 +202,6 @@ int main(void) {
     RUN_TEST(test_decode_threshold_accepts_49us_as_one);
     RUN_TEST(test_read_is_repeatable);
     RUN_TEST(test_read_recovers_after_timeout);
+    RUN_TEST(test_read_decodes_when_counter_rate_disagrees_with_system_clock);
     return UNITY_END();
 }

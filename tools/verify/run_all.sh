@@ -4,8 +4,8 @@
 #
 #   1. Firmware build + real memory footprint  (requires PlatformIO; skipped if absent)
 #   2. Native unit tests                       (33 expected)
-#   3. DHT22 host simulation                   (14 expected)
-#   4. Static analysis                         (1 + 21 + 1 findings expected)
+#   3. DHT22 host simulation                   (15 expected)
+#   4. Static analysis                         (2 + 21 + 1 findings expected)
 #   5. Application-only size breakdown         (clang, indicative)
 #   6. platformio.ini consistency              (local lib in lib_deps, default_envs,
 #                                               native build_src_filter / lib_ignore)

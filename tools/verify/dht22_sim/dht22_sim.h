@@ -41,6 +41,10 @@ void sim_load_bytes(const uint8_t data[5]);
 /* Replace the width of a single bit, to probe the 48 us decode threshold. */
 void sim_set_width(int index, uint16_t high_us);
 
+/* Move the counter's rate away from SystemCoreClock/1e6, to model a core whose
+ * real clock the firmware has mis-identified. */
+void sim_set_counter_cycles_per_us(uint32_t cycles_per_us);
+
 /* Hooks referenced by the injected DWT macro and the simulated RTOS. */
 void dht22_sim_tick(void);
 DWT_Type *dht22_sim_dwt(void);

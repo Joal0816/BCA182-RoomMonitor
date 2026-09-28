@@ -119,7 +119,7 @@ makes no forward progress without the counter the model drives.
 ./tools/verify/run_all.sh              # every pass below, in one command
 
 ./tools/verify/run_tests.sh            # 33 native unit tests
-./tools/verify/dht22_sim/run_dht22_sim.sh  # 14 DHT22 driver tests against a host sensor model
+./tools/verify/dht22_sim/run_dht22_sim.sh  # 15 DHT22 driver tests against a host sensor model
 ./tools/verify/run_static_analysis.sh  # clang --analyze, clang-tidy, -Wall -Wextra
 ./tools/verify/run_size_analysis.sh    # ARM object sizes + linked ELF estimate
 python3 tools/verify/check_config.py   # platformio.ini vs. the contents of lib/

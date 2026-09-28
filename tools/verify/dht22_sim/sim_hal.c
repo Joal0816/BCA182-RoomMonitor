@@ -12,7 +12,11 @@ static uint16_t g_pin;
 static uint32_t g_us;
 static DHT22_SimMode_t g_mode;
 
-#define DHT22_SIM_CYCLES_PER_US (SystemCoreClock / 1000000U)
+/* Counter cycles per virtual microsecond.  Normally this follows
+ * SystemCoreClock, but a test can move it independently to model a core whose
+ * clock the firmware has mis-identified (Wokwi runs the core at the board's
+ * nominal rate whatever RCC prescalers the firmware programmed). */
+static uint32_t g_counter_cycles_per_us = 72U;
 
 /* Pulse shapes of one DHT22 frame, in microseconds.  The sensor answers the
  * start signal with an 80 us low then an 80 us high pulse; every data bit is a
@@ -67,7 +71,7 @@ static uint8_t dht22_sim_level(uint32_t t) {
 
 void dht22_sim_tick(void) {
     g_us++;
-    g_dwt.CYCCNT = g_us * DHT22_SIM_CYCLES_PER_US;
+    g_dwt.CYCCNT = g_us * g_counter_cycles_per_us;
     sim_port.IDR = dht22_sim_level(g_us) ? (uint32_t)g_pin : 0U;
 }
 
@@ -92,6 +96,7 @@ void sim_reset(uint16_t pin) {
     g_pin = pin;
     g_us = 0U;
     g_mode = DHT22_SIM_FRAME;
+    g_counter_cycles_per_us = SystemCoreClock / 1000000U;
     g_dwt.CTRL = 0U;
     g_dwt.CYCCNT = 0U;
 
@@ -121,4 +126,8 @@ void sim_load_bytes(const uint8_t data[5]) {
         uint8_t bit = (uint8_t)((byte >> (7 - (i % 8))) & 0x1U);
         g_width[i] = bit ? 70U : 26U;
     }
+}
+
+void sim_set_counter_cycles_per_us(uint32_t cycles_per_us) {
+    g_counter_cycles_per_us = cycles_per_us;
 }
