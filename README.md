@@ -22,7 +22,7 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 
 ### Verification status
 
-`bash tools/verify/run_all.sh` runs seven passes. Six execute on this machine and all pass:
+`bash tools/verify/run_all.sh` runs seven passes, all of which execute on this machine and all pass:
 
 | Pass | Result |
 |---|---|
@@ -33,7 +33,7 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 | Application-only size breakdown | **PASS** |
 | `platformio.ini` consistent with `lib/` | **PASS** |
 | Report PDF matches its Markdown | **PASS** |
-| Wokwi diagram lint | *skipped* — needs `wokwi-cli` |
+| Wokwi diagram lint (`--offline`) | **PASS** |
 
 **Scheduler runtime — reproduced.** The firmware boots, starts the FreeRTOS scheduler and
 enters all five tasks. This was replayed under **Renode 1.17.0** against this revision, where
