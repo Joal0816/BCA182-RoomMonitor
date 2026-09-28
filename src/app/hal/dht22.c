@@ -155,26 +155,23 @@ static void DHT22_Delay_us(uint32_t us) {
     }
 }
 
-/* Wait until the data line reaches `high` (1) or `low` (0).  Every edge of a
-   frame follows the previous one within DHT22_EDGE_US, so that constant is the
-   bound for all of them.  The cycle budget is compared as an unsigned
-   difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
-   time rather than a huge one and cannot end the wait early. */
-/* Counter-cycle budget for the wait in progress.  It is kept at file scope
-   rather than passed to DHT22_WaitLevel so that function keeps a single
-   integer parameter -- two adjacent integers of convertible type read as
-   swappable.  The handshake installs a nominal-scale budget; the bit loop
-   replaces it with one derived from the measured scale. */
-static uint32_t s_wait_budget = 0U;
-
-static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high) {
+/* Wait until the data line reaches `high` (1) or `low` (0), giving up after
+   *budget_cycles counter cycles.  The budget is passed by pointer rather than by
+   value so that this function keeps a single integer parameter -- two adjacent
+   integers of convertible type read as swappable -- while staying free of
+   shared state, so two callers cannot disturb each other's bound.  It is
+   compared as an unsigned difference of two CYCCNT samples, so a counter wrap
+   reads as a small elapsed time rather than a huge one and cannot end the wait
+   early. */
+static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high,
+                               const uint32_t *budget_cycles) {
     if (DHT22_CycleCounterReady()) {
         uint32_t start = DWT->CYCCNT;
         for (;;) {
             if (DHT22_IsHigh(dht) == high) {
                 return 1U;
             }
-            if ((DWT->CYCCNT - start) > s_wait_budget) {
+            if ((DWT->CYCCNT - start) > *budget_cycles) {
                 return 0U;
             }
         }
@@ -189,12 +186,12 @@ static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high) {
     return 0U;
 }
 
-static uint8_t DHT22_WaitHigh(const DHT22_t *dht) {
-    return DHT22_WaitLevel(dht, 1U);
+static uint8_t DHT22_WaitHigh(const DHT22_t *dht, const uint32_t *budget_cycles) {
+    return DHT22_WaitLevel(dht, 1U, budget_cycles);
 }
 
-static uint8_t DHT22_WaitLow(const DHT22_t *dht) {
-    return DHT22_WaitLevel(dht, 0U);
+static uint8_t DHT22_WaitLow(const DHT22_t *dht, const uint32_t *budget_cycles) {
+    return DHT22_WaitLevel(dht, 0U, budget_cycles);
 }
 
 static uint8_t DHT22_ComputeChecksum(uint8_t *data) {
@@ -236,8 +233,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     /* Nominal scale, replaced below by one measured from the reply itself. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
     /* The handshake runs before the reply can be timed, so it uses the nominal
-       scale; the bit loop installs the measured one before it starts. */
-    s_wait_budget = DHT22_EDGE_US * cycles_per_us;
+       scale; the bit loop replaces this with the measured one before it
+       starts. */
+    uint32_t wait_budget = DHT22_EDGE_US * cycles_per_us;
 
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
@@ -252,14 +250,14 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        turns the counter's own ticks into microseconds.  Deriving the scale from
        the counter, rather than trusting SystemCoreClock, is what keeps the bit
        decode correct when the two do not agree. */
-    if (!DHT22_WaitLow(dht) || !DHT22_WaitHigh(dht)) {
+    if (!DHT22_WaitLow(dht, &wait_budget) || !DHT22_WaitHigh(dht, &wait_budget)) {
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
 
     if (measure) {
         uint32_t rise = DWT->CYCCNT;
-        if (!DHT22_WaitLow(dht)) {
+        if (!DHT22_WaitLow(dht, &wait_budget)) {
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
@@ -269,7 +267,7 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             measured <= DHT22_MAX_CYCLES_PER_US) {
             cycles_per_us = measured;
         }
-    } else if (!DHT22_WaitLow(dht)) {
+    } else if (!DHT22_WaitLow(dht, &wait_budget)) {
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
@@ -280,18 +278,18 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
 
     /* The scale is now measured, so the per-bit bound is a genuine number of
        microseconds rather than a nominal one. */
-    s_wait_budget = DHT22_BIT_EDGE_US * cycles_per_us;
+    wait_budget = DHT22_BIT_EDGE_US * cycles_per_us;
 
     for (int i = 0; i < 40; i++) {
         /* Rising edge: end of the 50 us low pulse that opens every bit. */
-        if (!DHT22_WaitHigh(dht)) {
+        if (!DHT22_WaitHigh(dht, &wait_budget)) {
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
 
         if (measure) {
             uint32_t rise = DWT->CYCCNT;
-            if (!DHT22_WaitLow(dht)) {
+            if (!DHT22_WaitLow(dht, &wait_budget)) {
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
@@ -302,7 +300,7 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
                correct side of the decode threshold. */
             DHT22_Delay_us(30);
             high_us[i] = DHT22_IsHigh(dht) ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
-            if (!DHT22_WaitLow(dht)) {
+            if (!DHT22_WaitLow(dht, &wait_budget)) {
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
