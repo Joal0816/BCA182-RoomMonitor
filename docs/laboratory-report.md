@@ -380,7 +380,8 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 > **Replay outcome.** The runs were subsequently re-executed against the current revision
 > with the Wokwi toolchain available and authenticated. **None of them reproduced.** Every
 > session emits three boot lines and then stops, with no task started and therefore no
-> peripheral interaction at all. The `Status` column below therefore records the original
+> peripheral interaction at all. The `Development status` column below therefore records the
+> original
 > development-time observations and is *not* a current result. See L-07 in
 > `docs/limitations.md` for the full replay outcome and for exactly what it does and does
 > not establish.
