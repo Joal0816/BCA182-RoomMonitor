@@ -156,13 +156,16 @@ static void DHT22_Delay_us(uint32_t us) {
 }
 
 /* Wait until the data line reaches `high` (1) or `low` (0), giving up after
-   *budget_cycles counter cycles.  The budget is passed by pointer rather than by
-   value so that this function keeps a single integer parameter -- two adjacent
-   integers of convertible type read as swappable -- while staying free of
-   shared state, so two callers cannot disturb each other's bound.  It is
-   compared as an unsigned difference of two CYCCNT samples, so a counter wrap
-   reads as a small elapsed time rather than a huge one and cannot end the wait
-   early. */
+   *budget_cycles counter cycles; budget_cycles must not be NULL.  It is passed
+   by pointer rather than by value so that this function keeps a single integer
+   parameter -- two adjacent integers of convertible type are reported as
+   swappable by clang-tidy -- while staying free of shared state, so two callers
+   cannot disturb each other's bound.  The budget is compared as an unsigned
+   difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
+   time rather than a huge one and cannot end the wait early.  When no cycle
+   counter is available the budget goes unused: the fallback counts iterations
+   against the fixed DHT22_EDGE_TIMEOUT, because there is no clock to convert
+   microseconds with. */
 static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high,
                                const uint32_t *budget_cycles) {
     if (DHT22_CycleCounterReady()) {
