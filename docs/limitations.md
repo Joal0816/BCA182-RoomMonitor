@@ -389,11 +389,11 @@ Given the Wokwi UART and OLED limitations, the project employs a three-tier veri
 - Fault indication: the `PC13` LED blinks inside the stack-overflow and malloc-failed hooks
 - **Not** usable for verifying critical-section behaviour: Wokwi does not implement `BASEPRI` (L-08), so `portENTER_CRITICAL()`/`portEXIT_CRITICAL()` have no effect there
 
-> Tier 1 as listed describes what the simulator is *capable* of showing. The free Wokwi CI
-> token available at the time configured but will not authenticate, so no fixed-revision run could be taken; the
-> `[TASK] <name> entered` banners have not been observed *under Wokwi*. They **have** been
-> observed under Renode, which models SysTick, the NVIC and USART faithfully — see L-07 for
-> the captured log. Wokwi remains the right place to demonstrate the peripherals it models
+> Tier 1 as listed describes what the simulator is *capable* of showing. The Wokwi CI token
+> available at the time is configured but no longer authenticates, so no fixed-revision run
+> could be taken; the `[TASK] <name> entered` banners have not been observed *under Wokwi*.
+> They **have** been observed under Renode, which models SysTick, the NVIC and USART
+> faithfully — see L-07 for the captured log. Wokwi remains the right place to demonstrate the peripherals it models
 > and Renode does not (the SSD1306 and the DHT22), and vice versa.
 
 ### Tier 2: Native Unit Testing (Primary)
