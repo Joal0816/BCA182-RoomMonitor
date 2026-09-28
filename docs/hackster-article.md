@@ -222,14 +222,17 @@ Ten functional checks cover temperature display, humidity display, light display
 
 The system is built for Wokwi with all 7 peripheral components wired:
 
-> **Status note.** The circuit and firmware are complete, and the simulator deviations that
-> were blocking the boot have been identified and worked around (see Challenge 4 below).
-> The demonstration steps and serial transcript below record development-time observations.
-> They have since been replayed against the current revision and were **not** reproduced:
-> the simulator session stopped after its boot lines with no task running — a defect since
-> so the transcript below should be read as the intended behaviour rather than a current
-> result. See `docs/limitations.md` L-07 for the full replay result. The 33 native unit
-> tests and the static-analysis passes *do* reproduce, and all pass.
+> **Status note.** The circuit and firmware are complete, and the port defects that were
+> blocking the scheduler have been found and fixed (see Challenge 5 below).
+> The demonstration steps and serial transcript below record development-time observations
+> of the intended behaviour. They were replayed against a revision that still carried the
+> scheduler hang and were not reproduced then — every session stopped after its boot lines
+> with no task running. That hang is now fixed, and the fixed firmware **was** replayed
+> successfully under Renode, where all five tasks are entered and the boot log continues
+> past `[MAIN] Starting FreeRTOS scheduler`. Read the transcript as the intended per-peripheral
+> behaviour, with task execution independently reproduced. See `docs/limitations.md` L-07 for
+> the evidence. The 33 native unit tests and the static-analysis passes *do* reproduce, and
+> all pass.
 
 1. **Active Monitoring & Page Navigation:**
    - The SSD1306 OLED displays current environmental telemetry.
@@ -264,11 +267,11 @@ The original OLED driver updated the screen by transmitting 1,024 individual I2C
 The 1-wire protocol requires sub-millisecond bus timing. Calling `HAL_Delay()` inside a critical section locked the processor because the SysTick interrupt was masked.
 - **Resolution:** Derived microsecond delays from the ARM Cortex-M3 Data Watchpoint and Trace cycle counter (`DWT->CYCCNT`), running at 72 MHz (13.88 ns per tick), so no interrupt is needed. The counter's enable bit lives in `DWT->CTRL`, which is a writable configuration register — it reads back set as soon as software sets it, whether or not `CYCCNT` actually advances. The delay routine now verifies that the counter is running before trusting it, and falls back to a calibrated `nop` loop otherwise.
 
-### 3. Blocking Sensor Init Delayed the Whole Boot
+### 4. Blocking Sensor Init Delayed the Whole Boot
 `DHT22_Init()` waited 2 seconds for the sensor to stabilise before returning. Because `main()` calls it before `vTaskStartScheduler()`, that wait also postponed the first serial message and the start of `DisplayTask` — during which the board showed a blank OLED and an empty terminal.
 - **Resolution:** Moved the settling wait out of the driver and into `SensorTask` as a `vTaskDelay(SENSOR_SETTLE_MS)`, so it costs nothing on the boot path. Initialisation of an individual sensor must never gate the rest of the firmware.
 
-### 4. A Critical Section Taken Before the Scheduler Closed the Tick Gate Forever
+### 5. A Critical Section Taken Before the Scheduler Closed the Tick Gate Forever
 After the boot-blocking defect above was fixed, the terminal still showed only its boot lines — `[DIAG] VTOR … vectors-ok`, `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — followed by nothing at all. Every one of those lines is printed from `main()` *before* `vTaskStartScheduler()`, which localised the fault to the port rather than to any task, driver, or peripheral.
 
 Everything above that layer had already been eliminated: the wiring resolved to real pins, the pre-scheduler UART output proved the HSE oscillator and the 72 MHz PLL were locked, the heap had about 2 KB of headroom against a measured demand of ~10 KB, and the interrupt-priority assertions all passed. Finding the remaining cause needed a view of the CPU state at the moment of failure, and the obvious tool — the simulator's own debugger — could not provide one: hardware watchpoints are unsupported by its GDB stub. Running the same firmware under **Renode** made the answer immediate: `uwTick` was frozen at `3`, `SysTick->CTRL` read `0x00010005` with `TICKINT` **clear**, and `uxCriticalNesting` read `0xAAAAAAAA` in every sample.
@@ -318,11 +321,11 @@ with a mirrored early return in `vPortExitCritical()`. This is safe because befo
 - **An honest correction.** Earlier versions of this article blamed Wokwi's `cpsie` instruction, on the hypothesis that the simulator *sets* the interrupt masks instead of clearing them. That hypothesis was **wrong**. It is withdrawn here rather than quietly deleted, because the lesson it carries is the point of this section: a mechanism that explains a symptom is not the same thing as a verified cause, and two revisions of documentation treated it as one. The reference implementation this project was compared against carries the *same* latent flaw and survives only because it never calls `HAL_Delay` before starting its scheduler.
 - **Two further defects the same replay exposed.** `main.c` compiles with the FreeRTOS library's stock `portmacro.h` ahead of the project's own, so `portYIELD_FROM_ISR()` inside the EXTI callback stored `PENDSVSET` to the ICSR — but this port never services PendSV, so an external-interrupt yield would have vectored into `Default_Handler` and looped forever; it now calls `vPortYieldFromISR()` through an `extern` declaration. And `main()` reported an OLED failure through `UART_Mutex_Printf()` *before* the mutex had been created, so the diagnostic tripped `configASSERT( ( pxQueue ) )` at `queue.c:1673` instead of printing. Neither was visible in Wokwi; both surfaced within minutes under Renode.
 
-### 5. Silent Faults Were Indistinguishable From Hangs
+### 6. Silent Faults Were Indistinguishable From Hangs
 The default Cortex-M startup aliases every fault handler to a bare infinite loop, so a HardFault looked exactly like a hang: no output, no error, no indication of cause. This is what made the defect above expensive to find, and it was addressed independently of it.
 - **Resolution:** Added `src/drivers/diag.c`, which installs a `HardFault_Handler` that decodes the stacked exception frame and prints the fault status registers (`CFSR`, `HFSR`, `MMFAR`, `BFAR`) over USART1 by writing `USART1->DR` directly — it cannot use the normal logging path, which takes a mutex and would deadlock in a fault context. `main()` now also captures every `xTaskCreate()` return code, each task prints a banner on entry, and a post-scheduler guard reports if `vTaskStartScheduler()` ever returns. An LED on PC13 makes the existing fault hooks visible on the simulated board.
 
-### 6. Sensor Failure False Alarms
+### 7. Sensor Failure False Alarms
 If a sensor read timed out or suffered parity error, default zero values triggered an erroneous LOW temperature alarm (<18°C).
 - **Resolution:** Flagged failed reads with `NAN` and verified validity via `isnan()` before evaluating alarm thresholds.
 
