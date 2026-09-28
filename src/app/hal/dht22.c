@@ -36,9 +36,10 @@
    is the 70 us high pulse; the margin keeps the worst case -- a sensor that
    stalls mid-frame while SysTick is masked -- short.  It is tighter than the
    handshake bound because the bit loop runs 40 times and so dominates that
-   window, and it is converted with the rate measured from the reply rather than
-   with SystemCoreClock, so it stays that many real microseconds however wrong
-   the firmware's idea of the clock is. */
+   window.  It is converted with the higher of the measured rate and the
+   firmware's own, so it is that many real microseconds whenever the reply's
+   response pulse measured at least as fast as the firmware believes the clock
+   is, and the larger of the two otherwise. */
 #define DHT22_BIT_EDGE_US 200U
 
 /* Plausible range for the measured scale, in counter cycles per microsecond.  A
@@ -260,10 +261,14 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     }
     /* cycles_per_us is the decode scale, replaced below by the rate measured
        from the reply.  bound_scale is what the waits are budgeted against, and it
-       must never under-estimate the rate: a bound that is too generous only costs
+       must not under-estimate the rate: a bound that is too generous only costs
        stall time on the failure path, while one that is too small ends a wait the
        sensor was still about to satisfy.  The handshake has nothing but the
-       firmware's belief to go on. */
+       firmware's belief to go on, and neither has the bit loop in the one corner
+       where the response pulse measured short and the firmware also under-states
+       the clock: there no evidence available here yields a rate above the real
+       one, so a bad frame is then reported as a timeout rather than as
+       DHT22_ERROR. */
     uint32_t cycles_per_us = nominal_scale;
     uint32_t bound_scale = nominal_scale;
     uint32_t wait_budget = DHT22_EDGE_US * bound_scale;
@@ -311,8 +316,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         return DHT22_TIMEOUT;
     }
 
-    /* The reply has replaced the scale with a measured one, so this bound is now
-       that many real microseconds. */
+    /* The reply has supplied a measured rate and bound_scale is the higher of it
+       and the firmware's belief, so this is DHT22_BIT_EDGE_US real microseconds
+       unless the firmware over-estimated the clock. */
     wait_budget = DHT22_BIT_EDGE_US * bound_scale;
 
     for (int i = 0; i < 40; i++) {

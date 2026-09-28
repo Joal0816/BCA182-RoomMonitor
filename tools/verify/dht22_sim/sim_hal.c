@@ -137,6 +137,8 @@ void sim_set_counter_cycles_per_us(uint32_t cycles_per_us) {
     g_counter_cycles_per_us = cycles_per_us;
 }
 
+/* Takes effect at the next frame: the level schedule is a function of the frame
+ * time, so changing the width while a frame is in flight desynchronises it. */
 void sim_set_response_high_us(uint16_t us) {
     g_response_high_us = us;
 }
