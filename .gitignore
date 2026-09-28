@@ -9,3 +9,10 @@ __pycache__/
 
 # PlatformIO-generated compile database (large, machine-specific)
 compile_commands.json
+
+# Credentials -- never commit these
+.env
+.env.*
+*.tok
+user.tok
+wokwi.toml.local
