@@ -525,12 +525,12 @@ They were confirmed against the linked ELF with `size -A` / `nm`, which is the a
 
 | ELF section | Size | Contributes to |
 |-------------|------|----------------|
-| `.text` | 33,032 B | Flash |
+| `.text` | 32,872 B | Flash |
 | `.rodata` | 2,732 B | Flash |
 | `.data` | 488 B | Flash **and** RAM |
-| `.bss` | 15,304 B | RAM |
+| `.bss` | 15,308 B | RAM |
 
-Flash = `.text + .rodata + .data` = **36,092 B**; RAM = `.data + .bss` = **15,796 B**. The RAM total reconciles with its principal consumers: 2,458 B of application statics + 12,288 B FreeRTOS heap + 488 B of initialised data + 562 B of kernel, CMSIS-RTOS and vendor statics. The largest single application static is the OLED driver's 1,032-byte `oled` instance, followed by its 1,025-byte `tx_buf`.
+Flash = `.text + .rodata + .data` = 32,872 + 2,732 + 488 = **36,092 B**; RAM = `.data + .bss` = 488 + 15,308 = **15,796 B**. The RAM total reconciles with its principal consumers: 2,458 B of application statics + 12,288 B FreeRTOS heap + 488 B of initialised data + 562 B of kernel, CMSIS-RTOS and vendor statics. The largest single application static is the OLED driver's 1,032-byte `oled` instance, followed by its 1,025-byte `tx_buf`.
 
 **Accounting note on the Flash figure.** The 36,092 B total is PlatformIO's flash metric, which counts code and initialised data but excludes the interrupt vector table and the C runtime initialisation arrays. Those occupy a further 280 B — `.isr_vector` 268 B, `.init_array` 4 B, `.fini_array` 4 B, plus alignment — so the image actually written to flash, `firmware.bin`, is **36,372 B (55.5%)**. Both figures are correct; they measure slightly different things. The smaller number is used in the table above because it is the one PlatformIO reports, and it is the convention used throughout this report. The difference does not affect any conclusion: at 55.5% the design still has well over 40% of flash free.
 
@@ -538,11 +538,11 @@ Flash = `.text + .rodata + .data` = **36,092 B**; RAM = `.data + .bss` = **15,79
 
 | Metric | Bytes |
 |--------|-------|
-| Application `.text` | 6,778 |
+| Application `.text` | 6,834 |
 | Application `.rodata` | 512 |
 | Application `.data` | 0 |
 | Application `.bss` | 2,458 |
-| **Application flash total** | **7,290** |
+| **Application flash total** | **7,346** |
 | **Application RAM total** | **2,458** |
 
 The remainder of the image is the STM32Cube HAL drivers and the FreeRTOS kernel. These figures are produced by clang's built-in ARM target rather than `arm-none-eabi-gcc`, so they are not byte-identical to what the real toolchain emits — `libc`'s `__main`/`system` shims and the exact HAL code paths differ — but they are a faithful *relative* indicator of where the application's own bytes go, and unlike the whole-image totals above they are reproducible from the current tree with a single command. The two largest application objects are `src/main.c` (1,526 B `.text`, 1,396 B `.bss`) and `src/drivers/diag.c` (1,216 B `.text`, 36 B `.bss`). The OLED driver contributes 1,124 B of `.text` and 500 B of `.rodata` — the latter being the 25-byte init sequence table plus the 5×7 font — and 1,025 B of `.bss` for the bulk-transfer buffer.
