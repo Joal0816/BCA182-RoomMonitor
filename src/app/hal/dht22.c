@@ -162,10 +162,12 @@ static void DHT22_Delay_us(uint32_t us) {
    swappable by clang-tidy -- while staying free of shared state, so two callers
    cannot disturb each other's bound.  The budget is compared as an unsigned
    difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
-   time rather than a huge one and cannot end the wait early.  When the DWT
-   cycle counter is not running the budget is unused -- it is denominated in DWT
-   cycles, which cannot then be measured -- so the fallback counts iterations
-   against the fixed DHT22_EDGE_TIMEOUT instead. */
+   time rather than a huge one and cannot end the wait early; a counter that had
+   stopped, by contrast, would hold elapsed at zero and the wait would not end
+   at all, which is why the "counter is running" verdict is cached only once.
+   When the DWT cycle counter is not running the budget is unused -- it is
+   denominated in DWT cycles, which cannot then be measured -- so the fallback
+   counts iterations against the fixed DHT22_EDGE_TIMEOUT instead. */
 static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high,
                                const uint32_t *budget_cycles) {
     if (DHT22_CycleCounterReady()) {
@@ -233,8 +235,14 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
    vTaskDelay before entering it rather than by a busy-wait inside. */
 static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint8_t measure = DHT22_CycleCounterReady();
-    /* Nominal scale, replaced below by one measured from the reply itself. */
+    /* Nominal scale, replaced below by one measured from the reply itself.  If
+       SystemCoreClockUpdate() has not run then SystemCoreClock is still 0, and a
+       zero scale would make every handshake budget zero and time out at once,
+       so floor it before it is used. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
+    if (cycles_per_us == 0U) {
+        cycles_per_us = 1U;
+    }
     /* The handshake runs before the reply can be timed, so it uses the nominal
        scale; the bit loop replaces this with the measured one before it
        starts. */
@@ -273,10 +281,6 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     } else if (!DHT22_WaitLow(dht, &wait_budget)) {
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
-    }
-
-    if (cycles_per_us == 0U) {
-        cycles_per_us = 1U;
     }
 
     /* The scale is now measured, so the per-bit bound is a genuine number of
