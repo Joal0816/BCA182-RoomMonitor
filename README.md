@@ -22,18 +22,19 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 
 ### Verification status
 
-`bash tools/verify/run_all.sh` runs seven passes, all of which execute on this machine and all pass:
+`bash tools/verify/run_all.sh` runs seven passes, all of which execute on this machine and all pass. Row 1a is a build-time
+post-action rather than a pass of its own, so the table has eight rows for seven passes:
 
 | Pass | Result |
 |---|---|
-| Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.1%) | **PASS** |
-| Patched port present, no PendSV store, pre-scheduler guards intact | **PASS** |
-| 33 native unit tests | **PASS** |
-| Static analysis, counts unchanged | **PASS** |
-| Application-only size breakdown | **PASS** |
-| `platformio.ini` consistent with `lib/` | **PASS** |
-| Report PDF matches its Markdown | **PASS** |
-| Wokwi diagram lint (`--offline`) | **PASS** |
+| 1. Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.1%) | **PASS** |
+| 1a. Build guard: patched port present, no PendSV store, pre-scheduler guards intact | **PASS** |
+| 2. 33 native unit tests | **PASS** |
+| 3. Static analysis, counts unchanged | **PASS** |
+| 4. Application-only size breakdown | **PASS** |
+| 5. `platformio.ini` consistent with `lib/` | **PASS** |
+| 6. Wokwi diagram lint (`--offline`) | **PASS** |
+| 7. Report PDF matches its Markdown | **PASS** |
 
 **Scheduler runtime — reproduced.** The firmware boots, starts the FreeRTOS scheduler and
 enters all five tasks. This was replayed under **Renode 1.17.0** against this revision, where
