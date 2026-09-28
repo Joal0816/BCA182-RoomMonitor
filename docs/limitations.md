@@ -16,7 +16,7 @@
 | L-04 | Fixed (compile-time) priority scheme | Low | Priorities validated during design phase | Accepted |
 | L-05 | Wokwi UART output unavailable | High | Use short Blue Pill pin labels and wire `A9` → `$serialMonitor:RX` in `diagram.json` | Fix applied |
 | L-06 | Wokwi OLED display unavailable | High | Send frame buffer in one bulk I2C transaction | Improved, not the fix |
-| L-07 | Wokwi `cpsie` sets the interrupt masks instead of clearing them | High | Clear `PRIMASK`/`FAULTMASK` with `msr` before the `svc` in a project-local port | Fix applied, unverified in simulator |
+| L-07 | Wokwi `cpsie` sets the interrupt masks instead of clearing them | High | Clear `PRIMASK`/`FAULTMASK` with `msr` before the `svc` in a project-local port | Fix applied; runtime replay attempted, task execution **not** confirmed |
 | L-08 | Wokwi does not implement `BASEPRI` | Medium | None possible — critical sections are not protected in the simulator | Accepted |
 | L-09 | Wokwi silently discards unrecognised pin labels | Medium | Use short header labels only; never long-form `mcu:PA9` | Mitigated |
 | L-10 | OLED driver discarded every I2C status | Medium | Return `HAL_StatusTypeDef` from `OLED_Init()`/`OLED_Update()` and report failures over UART | Fix applied |
@@ -24,10 +24,15 @@
 > **What the `Status` column means.** `Fix applied` records that the change is present in the
 > repository — not that it has been observed to work. The three simulator-defect fixes
 > (L-05, L-06, L-07) were each introduced to address a cause identified by reasoning and by
-> object-code inspection, and none of them has been replayed in Wokwi since. L-07 in
-> particular is the difference between a board that appears dead and one that boots, and
-> that difference has **not** been demonstrated on the current revision. The first task for
-> anyone resuming this work is to run one simulator session and confirm it.
+> object-code inspection.
+>
+> **Update — runtime replay performed.** The Wokwi simulation has now been executed against
+> the current revision, repeatedly and reproducibly. The result is recorded in full under
+> L-07: the firmware emits its three boot lines and then stops. The tasks have therefore
+> **not** been observed running under the simulator, and the L-07 patch — while present in
+> the linked image — does not produce a visibly running system there. Anyone resuming this
+> work should read L-07 before trusting any "works in Wokwi" statement elsewhere in the
+> repository.
 
 ---
 
@@ -90,7 +95,7 @@ Resolution: Accepted. Priority scheme is appropriate for the fixed functionality
 
 **Root Cause & Fix:** Two distinct faults had to be corrected. First, USART1 transmission in Wokwi requires an explicit connection to `$serialMonitor` in `diagram.json`. Second, and more subtly, the connections were originally written using long-form pin identifiers (`mcu:PA9`, `mcu:PA1`, `mcu:3.3V`). Wokwi does not recognise these names and **silently discards the affected wires** rather than reporting an error, so only `mcu:GND.1` survived. The diagram was rewritten using the Blue Pill's short header labels (`A0`/`A1`/`A9`/`A10`, `3V3.1`, `5V.1`, `GND.1`), and the serial monitor is now wired as `["mcu:A9", "$serialMonitor:RX", "red", ["v0"]]`. USART1 output now functions as expected at 115200 baud in the simulation terminal.
 
-**Resolution:** Fully resolved and verified.
+**Resolution:** Fully resolved and verified. This is the one simulator fix whose effect has been re-observed on the current revision: the boot log is produced over USART1 in the simulation terminal, which could not have happened while the wires were being silently discarded.
 
 ---
 
@@ -104,7 +109,7 @@ Resolution: Accepted. Priority scheme is appropriate for the fixed functionality
 
 ---
 
-### L-07: Wokwi `cpsie` Sets the Interrupt Masks (Fix Applied, Not Re-verified)
+### L-07: Wokwi `cpsie` Sets the Interrupt Masks (Fix Applied, Runtime Unconfirmed)
 
 **Original Issue:** After a successful build, a Wokwi run produced exactly two lines of serial output — `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — and then nothing at all. No task banner, no `[SENSOR]` line, no OLED content, no LED activity. Both lines that appeared are printed from `main()` *before* `vTaskStartScheduler()` is called, so the boundary between working and silent output fell exactly at the scheduler start.
 
@@ -120,7 +125,12 @@ svc 0            ; start the first task
 
 On real ARMv7-M hardware `cpsie i` clears `PRIMASK` and `cpsie f` clears `FAULTMASK`. Wokwi's Cortex-M3 model implements these instructions with the **opposite** effect: they set the masks instead of clearing them. `PRIMASK` is therefore left at 1 when the `svc 0` executes, and because `SVCall` is a configurable-priority exception it is masked by `PRIMASK`. The supervisor call never fires, the first task is never entered, and the system sits in the idle loop of `xPortStartScheduler()` forever with interrupts masked — no tick, no context switch, no output.
 
-This explains the symptom set exactly, including the detail that made it confusing: the two `[MAIN]` lines appear because they are emitted before the scheduler starts, and everything after that point is silent because nothing after that point ever runs.
+This is put forward as the **leading hypothesis** for the symptom set, not as a verified
+cause. It accounts for the detail that made the problem confusing — the two `[MAIN]` lines
+appear because they are emitted before the scheduler starts, and everything after that point
+is silent — but it has not been confirmed by observing the masks at the point of failure.
+See the runtime replay result below for what the current revision actually does, and for the
+evidence that both supports and limits this explanation.
 
 **Fix:** The project carries a local copy of the port at `lib/freertos_port_patch/src/port.c` — the stock V11.3.1 ARM_CM3 port with three instructions added before the `svc`:
 
@@ -133,7 +143,56 @@ svc 0
 
 `msr` is the architecturally correct way to clear these masks, and on real hardware the added instructions are redundant no-ops that leave the register state identical to what `cpsie` would have produced. The `cpsie` instructions are deliberately **kept** rather than removed, so the port stays correct on genuine silicon and the deviation is confined to three instructions that are harmless there. The library's `library.json` sets `"libArchive": false`, which links the patched `port.o` as a plain object rather than an archive member, so a duplicate symbol fails the link loudly instead of silently falling back to the unpatched copy. `tools/verify/check_port_patch.py` runs as a post-build action and warns if the patched object is missing from the build directory.
 
-**Resolution:** Fixed. The defect is in the simulator's instruction semantics rather than in this project's code, so no application-level change could have addressed it. The alternative — adopting the reference implementation's entire custom port — was rejected because that port targets FreeRTOS V10.3.1 and would forfeit V11 behaviour including `configCHECK_HANDLER_INSTALLATION` and the V11 SVC/PendSV handler naming.
+**Resolution:** Fix applied; runtime behaviour **not** confirmed. The defect is in the simulator's instruction semantics rather than in this project's code, so no application-level change could have addressed it. The alternative — adopting the reference implementation's entire custom port — was rejected because that port targets FreeRTOS V10.3.1 and would forfeit V11 behaviour including `configCHECK_HANDLER_INSTALLATION` and the V11 SVC/PendSV handler naming.
+
+**Runtime replay result (current revision, no debugger attached).** The simulation was
+re-executed against the current build, repeatedly and reproducibly. It does **not** show a
+running system:
+
+```
+[DIAG] VTOR was 0x08000000, now 0x08000000; vec[11]=0x080029AD vec[14]=0x080029F9 vectors-ok
+[MAIN] System initialized
+[MAIN] Starting FreeRTOS scheduler
+        <- no further output; session never terminates on its own
+```
+
+Exactly three lines, every run, with no task banner, no OLED frame, and no LED activity.
+What this establishes, and what it does not:
+
+- **Established.** The patched port *is* in the linked image (the post-build
+  `tools/verify/check_port_patch.py` action reports `patched ARM_CM3 port.o is in the
+  image`), and the `movs r0,#0` / `msr primask,r0` / `msr faultmask,r0` sequence is present
+  at the expected addresses in `firmware.elf`. Vector entries 11 (`SVC_Handler`,
+  `0x080029AD`) and 14 (`PendSV_Handler`, `0x080029F9`) both point into the patched port,
+  which the boot log's own `vectors-ok` line confirms at runtime, so
+  `configCHECK_HANDLER_INSTALLATION` passes.
+- **Established.** Every *instrumented* failure path is excluded, because each writes an
+  unconditional line over a raw-register channel that does not depend on the mutex, the HAL,
+  or the C library (`src/drivers/diag.c`, whose TXE poll is bounded so it cannot itself
+  hang). None of those lines appear: no `[MAIN] FATAL: xTaskCreate failed`, no
+  `[MAIN] FATAL: vTaskStartScheduler returned`, no `[FATAL] Stack overflow`, no
+  `[FATAL] Malloc failed`, and no `[ASSERT]` line — so no `configASSERT` fired and all five
+  tasks were created successfully within the 12 KB heap.
+- **Not established.** Whether the tasks actually start. This matters because the boot log
+  is genuinely ambiguous at this boundary: all three emitted lines are written *before*
+  `vTaskStartScheduler()` — the two `[MAIN]` lines from `UART_Mutex_Printf`, which uses a
+  semaphore and `HAL_UART_Transmit` — whereas every `[TASK] <name> entered` banner is
+  emitted through that same mutex-and-HAL path from inside a task. A break *after* the
+  scheduler starts but *before* the logging path becomes usable would therefore be
+  indistinguishable from the first task never starting, on the evidence available.
+- **Not established.** The mechanism. The causal explanation given above (Wokwi's `cpsie`
+  setting rather than clearing the masks, so the `svc 0` is masked and the first task is
+  never entered) remains the leading hypothesis, but it is a hypothesis supported by
+  reasoning and object-code inspection, not by an observation of the faulting instruction.
+  A debugger attach against the simulated target proved unreliable in this environment —
+  hardware watchpoints are unsupported by the Wokwi GDB stub, and the 1 kHz SysTick starves
+  the session — so the mechanism was not confirmed directly.
+- **Caveat on the evidence channel.** One instrumented probe run in this environment showed
+  the serial transport being cut by the simulation API (`code 1006`) rather than reaching
+  the requested timeout, and the serial log file was truncated at a fixed size when the
+  process was killed. Simulator sessions here are therefore only a *partially* reliable
+  observation channel, and the three-line result should be read as "reproducibly observed",
+  not as a precise measurement of where execution stops.
 
 ---
 
@@ -184,7 +243,15 @@ svc 0
 
 **On the "hardware validation" column.** Earlier revisions of this table listed hardware validation against several rows. That column has been removed because no hardware validation was performed during this work — the ST-Link and physical board are documented in the report as the intended deployment path, not as an exercised one.
 
-**On the word "Works".** It records that Wokwi models the peripheral and that the firmware is wired to it correctly — it is not a claim that the behaviour was observed on the current revision. Every row in which the word appears was last exercised before the port patch of L-07, and no simulator session has been run since. The one row that is a genuine finding rather than a status is the last: `BASEPRI` is not implemented by the simulator at all, which no amount of re-running will change.
+**On the word "Works".** It records that Wokwi models the peripheral and that the firmware is
+wired to it correctly — it is not a claim that the behaviour was observed on the current
+revision. **As of the latest replay, no row in this table has been observed working end to
+end**: every simulator session against the current build stops after the three boot lines,
+before any task runs, so no peripheral interaction occurs. The per-peripheral rows record
+correct modelling and correct wiring, verified by inspection and by the diagram lint
+(`tools/verify/run_all.sh` pass 6) rather than by an observed run. The one row that is a
+genuine finding rather than a status is the last: `BASEPRI` is not implemented by the
+simulator at all, which no amount of re-running will change.
 
 ---
 
@@ -200,8 +267,10 @@ Given the Wokwi UART and OLED limitations, the project employs a three-tier veri
 - Fault indication: the `PC13` LED blinks inside the stack-overflow and malloc-failed hooks
 - **Not** usable for verifying critical-section behaviour: Wokwi does not implement `BASEPRI` (L-08), so `portENTER_CRITICAL()`/`portEXIT_CRITICAL()` have no effect there
 
-> Tier 1 as listed describes what the simulator is *capable* of showing. It has not been
-> re-run since the port patch; no application task toggles GPIO, so the LED is a fault
+> Tier 1 as listed describes what the simulator is *capable* of showing. It has been re-run
+> against the current revision and did **not** show task execution: the session stops after
+> the three boot lines (see L-07). The `[TASK] <name> entered` banners are therefore
+> currently unobserved, and no application task toggles GPIO, so the LED is a fault
 > indicator only and not a heartbeat.
 
 ### Tier 2: Native Unit Testing (Primary)
@@ -236,7 +305,7 @@ The ST-Link wiring needed to perform it is documented in the report.
 | L-04 Fixed priority | Low | High — validated via experiments | Very Low |
 | L-05 Silent wire discard | High | Short pin labels only (procedural) | Low |
 | L-06 Bulk I2C transfer | Low | Retained on its own merits | Very Low |
-| L-07 `cpsie` masks / no scheduler | High | Project-local port patch, symbol-shadowing verified at object level | **Medium — the patch has never been replayed in Wokwi** |
+| L-07 `cpsie` masks / no scheduler | High | Project-local port patch, symbol-shadowing verified at object level | **High — replayed in Wokwi; the system still stops after the boot lines and no task was observed running** |
 | L-08 `BASEPRI` not implemented | Medium | None possible in simulation | Medium |
 | L-09 Long-form labels dropped | Medium | Short header labels only; documented | Low |
 
@@ -248,13 +317,13 @@ All four primary project limitations (L-01 to L-04) are properly documented, tec
 
 - **L-05 (UART)** — Wokwi silently discarded every wire written with a long-form pin label, so the serial monitor was never connected. Fixed by rewriting `diagram.json` with short header labels.
 - **L-06 (OLED)** — the driver sent 1,024 individual I2C transactions per frame; refactored to a single bulk transfer. This is a genuine improvement, but it was **not** the fix that made the display work.
-- **L-07 (`cpsie`)** — the actual cause of the blank display and silent terminal. Wokwi's Cortex-M3 model implements `cpsie` with the opposite effect to ARMv7-M, so the FreeRTOS port masked its own `svc 0` and the first task never started. Worked around in a project-local port with three added instructions that are no-ops on real hardware.
+- **L-07 (`cpsie`)** — the leading explanation for the blank display and silent terminal. Wokwi's Cortex-M3 model is believed to implement `cpsie` with the opposite effect to ARMv7-M, so the FreeRTOS port masked its own `svc 0` and the first task never started. Worked around in a project-local port with three added instructions that are no-ops on real hardware. **This fix has now been replayed in the simulator and the system still stops after the boot lines**, so the workaround is present but not sufficient to produce a visibly running system there; the mechanism remains a hypothesis rather than a confirmed cause.
 - **L-08 (`BASEPRI`)** — not implemented in Wokwi, so critical sections are not genuinely protected there. Accepted; `BASEPRI` works correctly on the target.
 - **L-09 (silent wire discard)** — the defect class that made L-06's "resolved" claim false. Procedurally mitigated.
 
 **A note on one earlier claim.** Commit `647b343` is titled *"OLED now renders in Wokwi"*, and that claim was carried into this documentation for several revisions. It was never true: at that commit every pin label was long-form, so Wokwi had discarded the OLED wire and the display was not connected. The claim is corrected in L-06 rather than deleted, because a commit message that asserts an unobserved result is itself a defect — it converts an untested change into a believed one, and it makes any later regression impossible to diagnose.
 
-For grading purposes, all functional requirements are verified through the combination of native unit tests (33 tests, all passing), Wokwi full-circuit simulation, fault experiments (3 documented), and static code analysis (0 functional defects; 21 clang-tidy advisories, 1 compiler warning, and 2 benign memory-mapped-register findings).
+For grading purposes, the functional requirements are verified through the combination of native unit tests (33 tests, all passing), static code analysis (0 functional defects; 21 clang-tidy advisories, 1 compiler warning, and 2 benign memory-mapped-register findings), and the six-pass verification harness in `tools/verify/run_all.sh`. **Wokwi full-circuit simulation is not among the passing evidence**: the diagram lints cleanly and the firmware builds and links, but a simulator run does not reach running tasks, so no end-to-end behaviour was observed there. The fault experiments (3 documented) record development-time observations and are not replayable.
 
 **Evidence limits.** Three claims in this documentation could not be fully re-verified in the environment used to audit it. Each is flagged at its point of use. One of them has since been re-verified in full and one partially; the remainder is set out below.
 
@@ -262,7 +331,7 @@ For grading purposes, all functional requirements are verified through the combi
 
    The increase over that intermediate baseline is accounted for: the diagnostic instrumentation described in report §7.5 (`src/drivers/diag.c`: 1,216 B `.text`, 36 B `.bss`) and the `-Wl,-u,_printf_float` link flag, which pulls the newlib float formatter into the image at a cost of just under 3 KB. `tools/verify/run_size_analysis.sh` remains available as an application-only cross-check, but it uses clang's ARM target rather than `arm-none-eabi-gcc`, so its absolutes are indicative rather than authoritative.
 
-2. **Wokwi simulation runs.** *Not replayed.* The procedures in `docs/functional-verification.md` record development-time observations. Their expected results were checked line by line against the source, and the harness in `tools/verify/` reproduces the native unit tests and static analysis, but the simulated runs themselves were not re-executed. Replaying them needs the Wokwi CLI and an account token, which are not available here.
+2. **Wokwi simulation runs.** *Replayed; result negative.* The procedures in `docs/functional-verification.md` record development-time observations. Those observations were **not** reproduced: the simulation was re-executed against the current revision (repeatedly, reproducibly, without a debugger attached) and the firmware stops after its three boot lines without reaching any task — see L-07 for the full result and for what it does and does not establish. The environment was capable of running the simulation (the Wokwi CLI was available and authenticated for this pass), so the earlier statement that the tooling was unavailable no longer applies. Treat every development-time claim about observed simulator behaviour in `docs/functional-verification.md` as unconfirmed. The native unit tests and static analysis in `tools/verify/` do reproduce, and the diagram lint passes.
 
 3. **Fault-experiment logs.** *Not replayable.* No logs were stored. Their *predicted* outcomes are derived deterministically from `src/FreeRTOSConfig.h` and the task priorities in `src/main.c`, so they hold regardless of any run; the *observed* sections record what was seen at development time. The two are labelled separately throughout `docs/fault-experiments.md`. Re-running them would require physical hardware, and a simulator cannot expose RTOS scheduling internals such as priority starvation in any case.
 

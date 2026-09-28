@@ -220,14 +220,16 @@ Ten functional checks cover temperature display, humidity display, light display
 
 ## Demonstration
 
-The system was built and exercised in Wokwi with all 7 peripheral components wired:
+The system is built for Wokwi with all 7 peripheral components wired:
 
 > **Status note.** The circuit and firmware are complete, and the simulator deviations that
 > were blocking the boot have been identified and worked around (see Challenge 4 below).
-> The demonstration steps and serial transcript below record development-time observations;
-> the Wokwi toolchain was not available in the environment that produced the most recent
-> audit of this document, so they were not replayed. The 33 native unit tests *were* re-run
-> from scratch and all pass.
+> The demonstration steps and serial transcript below record development-time observations.
+> They have since been replayed against the current revision and were **not** reproduced:
+> the simulator session stops after the three boot lines and no task was observed running,
+> so the transcript below should be read as the intended behaviour rather than a current
+> result. See `docs/limitations.md` L-07 for the full replay result. The 33 native unit
+> tests and the static-analysis passes *do* reproduce, and all pass.
 
 1. **Active Monitoring & Page Navigation:**
    - The SSD1306 OLED displays current environmental telemetry.
