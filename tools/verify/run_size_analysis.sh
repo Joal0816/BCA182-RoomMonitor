@@ -67,7 +67,7 @@ flash = tot['.text'] + tot['.rodata'] + tot['.data']
 print()
 print('Application flash footprint (.text+.rodata+.data) : %6d B' % flash)
 print('Application static RAM   (.data+.bss)             : %6d B' % (tot['.data'] + tot['.bss']))
-print('  (OLED statics: 1024 B framebuffer in main.c + 1025 B tx_buf in oled.c)')
+print('  (OLED statics: 1032 B oled instance + 1025 B tx_buf in oled.c)')
 PY
 
 echo
