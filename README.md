@@ -26,7 +26,8 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 
 | Pass | Result |
 |---|---|
-| Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.3%) | **PASS** |
+| Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.1%) | **PASS** |
+| Patched port present, no PendSV store, pre-scheduler guards intact | **PASS** |
 | 33 native unit tests | **PASS** |
 | Static analysis, counts unchanged | **PASS** |
 | Application-only size breakdown | **PASS** |
@@ -34,12 +35,27 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 | Report PDF matches its Markdown | **PASS** |
 | Wokwi diagram lint | *skipped* — needs `wokwi-cli` |
 
-**One caveat is documented deliberately and should be read before grading:** the firmware
-builds and all tests pass, but a Wokwi simulation run against this revision stops after the
-three boot lines and never reaches a running task. All Wokwi behaviour in the report is
-therefore recorded as a development-time observation rather than a reproduced result. See
-**[L-07 in docs/limitations.md](docs/limitations.md)** for exactly what the replay established
-and what it did not.
+**Scheduler runtime — reproduced.** The firmware boots, starts the FreeRTOS scheduler and
+enters all five tasks. This was replayed under **Renode 1.17.0** against this revision, where
+the serial port emits:
+
+```
+[MAIN] System initialized
+[MAIN] Starting FreeRTOS scheduler
+[TASK] InputTask entered
+[TASK] MotionTask entered
+[TASK] AlarmTask entered
+[TASK] SensorTask entered
+[TASK] DisplayTask entered
+```
+
+An earlier revision stopped after its boot lines; the cause is documented as **L-07** in
+[docs/limitations.md](docs/limitations.md). Wokwi is the intended end-to-end simulator and
+its diagram lints cleanly offline, but the free CI quota was exhausted before a run could be
+taken against the fixed revision. Renode was used instead because it models the NVIC, SysTick
+and USART faithfully; it does **not** model the SSD1306 or the DHT22, so the per-peripheral
+`Actual Result` entries in the report remain development-time observations. Physical-hardware
+validation has not been performed.
 
 ---
 
@@ -279,7 +295,7 @@ pio check
 
 The project is simulated in Wokwi with all peripherals wired, including USART1 serial output (via `$serialMonitor`) and the SSD1306 OLED display (via bulk I2C buffer transmission).
 
-> **Status:** the simulation was used throughout development to iterate on the firmware. It was later replayed against the current revision with `wokwi-cli` installed and authenticated, and **the replay did not show a running system** — every session emits three boot lines and then stops, with no task started. The per-run observations quoted in [docs/functional-verification.md](docs/functional-verification.md) are therefore development-time notes, not a re-run of the current revision. See [docs/limitations.md](docs/limitations.md) L-07 for exactly what the replay did and did not establish.
+> **Status:** the simulation was used throughout development to iterate on the firmware. A later replay against a revision that still carried the scheduler hang reproduced no run — every session emitted its boot lines and then stopped, with no task started. That hang has since been root-caused and fixed, and the fixed firmware was replayed successfully under Renode, where all five tasks are entered (renode is used because it models the NVIC, SysTick and USART faithfully; it does not model the SSD1306 or DHT22, so the per-peripheral observations quoted in [docs/functional-verification.md](docs/functional-verification.md) remain development-time notes). See [docs/limitations.md](docs/limitations.md) L-07 for the evidence.
 >
 > What *is* re-runnable on the current revision without the simulator: the 7-pass local harness (`tools/verify/run_all.sh`), the 33 native unit tests, and the static analysis. All pass.
 
@@ -312,10 +328,10 @@ pio run -t clean && pio run
 **2. Confirm the port workaround is in the image.** The build log must contain:
 
 ```
-[port-patch] OK: patched ARM_CM3 port.o is in the image
+[port-patch] OK: patched ARM_CM3 port.o + include/portmacro.h in the image, no ICSR PendSV store, pre-scheduler critical sections deferred
 ```
 
-If it instead prints `[port-patch] WARNING: ... was NOT compiled`, the Wokwi `cpsie` workaround is missing and the first task will not start. A `multiple definition` link error is the *intended* loud failure and means the patch did not shadow the stock port — see [docs/limitations.md](docs/limitations.md) L-07.
+That single line asserts four things: the patched port object is in the build, `include/portmacro.h` still redirects every macro the kernel core needs, the linked image contains no store to the ICSR at `0xE000ED04` (the PendSV-yield escape described in Challenge 4 of the report), and both critical-section primitives still carry their pre-scheduler guard. If it instead prints `[port-patch] WARNING: ...`, one of those four has regressed and the firmware will print its boot lines and then stop. A `multiple definition` link error is the *intended* loud failure and means the patch did not shadow the stock port — see [docs/limitations.md](docs/limitations.md) L-07.
 
 **3. Start the simulator** as described in Option 1 above.
 

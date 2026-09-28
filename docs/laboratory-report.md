@@ -377,14 +377,18 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 > read as the developer's recorded observation, not as a result reproduced under the
 > current revision.
 >
-> **Replay outcome.** The runs were subsequently re-executed against the current revision
-> with the Wokwi toolchain available and authenticated. **None of them reproduced.** Every
-> session emits three boot lines and then stops, with no task started and therefore no
-> peripheral interaction at all. The `Development status` column below therefore records the
-> original
-> development-time observations and is *not* a current result. See L-07 in
-> `docs/limitations.md` for the full replay outcome and for exactly what it does and does
-> not establish.
+> **Replay outcome.** The runs were re-executed against the revision that still contained
+> the scheduler hang, and **none of them reproduced**: every session emitted its boot lines
+> and then stopped, with no task started and therefore no peripheral interaction at all.
+> That hang has since been root-caused, fixed, and replayed successfully (Challenge 4,
+> section 7.3). Against the fixed revision, the boot log does show the scheduler starting
+> and all five `[TASK] … entered` banners — reproduced under Renode rather than Wokwi,
+> because the free Wokwi CI quota was exhausted before a fixed-revision run could be taken.
+> The `Development status` column below therefore remains the original
+> development-time observation and is *not* itself a current Wokwi result. What is now
+> established is that the firmware reaches every task; the individual display and buzzer
+> values below still rest on the developer's original observations and on the
+> source-verifiable pass criteria. See L-07 in `docs/limitations.md`.
 
 | Test ID | Stimulus | Expected Result | Actual Result (development-time) | Development status |
 |---------|---------|----------------|--------------|--------|
@@ -408,7 +412,7 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 > (Challenge 4, section 7.3) — and the fault runs were subsequently replayed against the
 > current
 > revision with the Wokwi toolchain, where the runs did **not** reproduce: the session
-> stops after the three boot lines and no task was observed running. What *is* independently
+> stopped after its boot lines with no task running, because of the scheduler defect described in Challenge 4 (section 7.3); that defect is now fixed and the fixed firmware was replayed successfully under Renode, where all five tasks are entered. What *is* independently
 > checkable is the mechanism: each root-cause paragraph follows from the FreeRTOS
 > scheduling rules and the task priorities and periods in `src/main.h`, and each was
 > checked line by line against the source during this audit. They are presented as
@@ -504,16 +508,16 @@ The static analysis confirms that the production code is free of detectable func
 | Resource | Used | Available | Utilization |
 |----------|------|-----------|-------------|
 | RAM | 15,792 bytes | 20,480 bytes | 77.1% |
-| Flash | 36,252 bytes | 65,536 bytes | 55.3% |
+| Flash | 36,092 bytes | 65,536 bytes | 55.1% |
 
-RAM usage (77.1%) is within acceptable limits but leaves only ~4.5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 77.8% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,028-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,053 B. Flash usage (55.3%) leaves ample space for additional features; the increase over the pre-instrumentation baseline is almost entirely the newlib float formatter pulled in by `-Wl,-u,_printf_float` (just under 3 KB) plus the diagnostic instrumentation.
+RAM usage (77.1%) is within acceptable limits but leaves only ~4.5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 77.8% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,028-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,053 B. Flash usage (55.1%) leaves ample space for additional features; the increase over the pre-instrumentation baseline is almost entirely the newlib float formatter pulled in by `-Wl,-u,_printf_float` (just under 3 KB) plus the diagnostic instrumentation.
 
 **Provenance.** Both figures are reproduced directly from a PlatformIO build of the current revision. The block is quoted verbatim from that build's output:
 
 ```
 $ pio run -e bluepill_f103c8
 RAM:   [========  ]  77.1% (used 15792 bytes from 20480 bytes)
-Flash: [======    ]  55.3% (used 36252 bytes from 65536 bytes)
+Flash: [======    ]  55.1% (used 36092 bytes from 65536 bytes)
 ```
 
 They were confirmed against the linked ELF with `size -A` / `nm`, which is the authoritative source because it measures the artifact that is actually flashed rather than the linker's summary:
@@ -556,7 +560,7 @@ The following limitations remain in the current implementation:
 | L-04 | Fixed compile-time priority scheme | Priorities are compile-time constants. Runtime priority adjustment is possible with `vTaskPrioritySet()` but not implemented. | Accepted. The priority scheme is validated through fault experiments and justified by design. |
 | L-05 | Wokwi UART output unavailable | No serial output appeared at all in the simulation terminal. The cause was wiring, not firmware: `A9`/`A10` must be connected to `$serialMonitor` using short header labels. | Fixed. `diagram.json` wires `["mcu:A9", "$serialMonitor:RX", …]` with short labels only. The underlying defect class — Wokwi discarding a wire it does not recognise — is recorded separately as L-09. |
 | L-06 | OLED rendering stalled behind per-byte I2C transfers | The original driver issued 1,024 separate transactions per frame, each with its own START/STOP and control byte. | Improved, but not the fix that made the display work. `OLED_Update()` now sends the full 1,025-byte frame in one transaction. The misattribution of the blank display to this change is corrected in Challenge 2 (section 7.3). |
-| L-07 | Wokwi's `cpsie` is believed to set the interrupt masks instead of clearing them | The stock FreeRTOS Cortex-M3 port would mask its own `svc 0` and never start the first task, so the board appears dead after the pre-scheduler prints. This is the leading hypothesis for the blank OLED and the absent task output, but it has **not** been confirmed by direct observation, and the workaround does **not** produce a visibly running system in Wokwi. | Worked around in `lib/freertos_port_patch/src/port.c` by clearing `PRIMASK` and `FAULTMASK` with `msr` before the `svc`. The added instructions are redundant no-ops on real hardware. See Challenge 4 in section 7.3 and L-07 in `docs/limitations.md`. |
+| L-07 | A pre-scheduler critical section gated SysTick permanently | The port excludes the tick by clearing `SysTick->CTRL.TICKINT`, and `vPortExitCritical()` only restores it when the nesting counter returns to exactly 0. The counter starts at the sentinel `0xaaaaaaaa` ("kernel not started"), so the first critical section taken before `vTaskStartScheduler()` — reached from `xSemaphoreCreateMutex()` and `xTaskCreate()` in `main()` — closed the gate and nothing reopened it. `OLED_Init()`'s `HAL_Delay(100)` then waited on a frozen tick. | Fixed in `lib/freertos_port_patch/src/port.c`: both critical-section primitives now return early while `xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED`. Verified under Renode — `uwTick` advances, SysTick is never left gated, and all five tasks are entered. See Challenge 4 in section 7.3 and L-07 in `docs/limitations.md`. |
 | L-08 | Wokwi does not implement `BASEPRI` | The V11 port implements `portDISABLE_INTERRUPTS()`/`portENABLE_INTERRUPTS()` by writing `BASEPRI`, so critical sections are not genuinely protected in the simulator. A concurrency defect that depends on a critical section would not be caught by a Wokwi run. | Accepted as a simulator limitation. `BASEPRI` works as specified on real hardware, so the firmware is correct on the target; the consequence is only that Wokwi cannot validate critical-section behaviour. |
 | L-09 | Wokwi silently discards unrecognised pin labels | A wire written with a long-form pin name such as `mcu:PA9` is dropped without any error, so a mislabelled net is indistinguishable from an unconnected one. This produced a false "OLED renders correctly" conclusion that survived several revisions of this report. | Mitigated. All labels in `diagram.json` use the short header form, and the convention is recorded here so it is not reintroduced. There is no way to make Wokwi report the error, so the mitigation is procedural. |
 | L-10 | OLED driver discarded every I2C status | `OLED_SendCommand()`, `OLED_SendData()` and `OLED_Update()` called `HAL_I2C_Master_Transmit()` and discarded the result, so the firmware could not distinguish a panel that acknowledged its address from one that was absent or mis-addressed. A wiring fault therefore presented as a software fault. | Fixed. `OLED_Init()` and `OLED_Update()` now return `HAL_StatusTypeDef` and latch the first failure; `OLED_Init()` stops at the first unacknowledged command. `main.c` and `DisplayTask()` report the failure over UART. Transient failures are reported but not retried. |
@@ -566,7 +570,7 @@ The following limitations remain in the current implementation:
 - **UART output — wiring.** The serial terminal remained silent because the firmware never reached its first `printf`. `PA9 (TX)` is connected to `$serialMonitor` in `diagram.json`, and the connections use the Blue Pill's short header labels (`A9`, `A10`, `3V3.1`, `5V.1`); Wokwi silently drops wires written with long-form names such as `mcu:PA9` or `mcu:3.3V`. This is a real and reproducible defect class: Wokwi does not raise an error for an unrecognised pin name, it discards the wire, so a mislabelled net is indistinguishable from an unconnected one. Commit `3491fe7` corrected every label in `diagram.json` for this reason.
 - **OLED display — driver.** The original driver sent 1,024 individual I2C transactions (one per pixel byte), each with its own START/STOP and control byte. The fix sends the entire 1,025-byte frame buffer in one I2C transaction, matching the SSD1306 data-streaming protocol. This is a genuine improvement in both bus efficiency and simulator load, and it is verifiable by inspection of `src/app/hal/oled.c`.
 - **Boot-blocking sensor initialisation.** `DHT22_Init()` contained a 2-second blocking delay, and because `main()` calls it before `vTaskStartScheduler()`, that delay postponed every later initialisation — including the first serial message and the start of `DisplayTask`. The driver no longer waits; the settling time is absorbed by `SensorTask` as a `vTaskDelay()`, so it costs nothing on the boot path. The same driver also had two timing defects that made every read fail once the boot block was removed: the cycle counter was trusted on the strength of its own enable bit, and the bit decoder depended entirely on that counter. See Challenge 3 in section 7.3.
-- **Scheduler never started — the port defect (leading hypothesis).** This is the leading explanation for the blank OLED and the absent task output, and it is described in full in Challenge 4 (section 7.3). It is believed to be a deviation in Wokwi's Cortex-M3 model rather than a defect in this project's application code. **Two caveats must travel with this claim.** First, the mechanism has not been observed directly — it rests on reasoning and object-code inspection, because the Wokwi GDB stub does not support the watchpoints that would be needed to inspect `PRIMASK` at the point of failure. Second, the workaround, although confirmed present in the linked image and confirmed to leave the vector table correct at runtime, does **not** yield a visibly running system: a replay against the current revision still stops after the three boot lines. See L-07 in `docs/limitations.md` for the full replay result.
+- **Scheduler never started — the port defect (resolved).** This caused the blank OLED and the absent task output, and it is described in full in Challenge 4 (section 7.3). The cause was not a simulator deviation but a defect in the port's own critical-section handling: `vPortEnterCritical()` gated the kernel tick unconditionally, while `vPortExitCritical()` only reopened it when the nesting counter returned to exactly 0 — which it never did, because the counter starts at the `0xaaaaaaaa` "kernel not started" sentinel. The first critical section taken before `vTaskStartScheduler()`, reached from `xSemaphoreCreateMutex()` and `xTaskCreate()` in `main()`, therefore closed the tick gate permanently and `OLED_Init()`'s `HAL_Delay(100)` waited on a frozen tick. Both primitives now return early while the scheduler has not started. **Verified:** the fixed firmware was replayed under Renode and the boot log continues past the scheduler into all five `[TASK] … entered` banners. See L-07 in `docs/limitations.md`.
 
 **A note on the strength of the evidence.** The first three items above are supported by source inspection and by the commit history. The fourth is supported by disassembly of the linked image plus the documented behaviour of the simulator, and it is the only hypothesis that accounts for the *complete* symptom set — two `[MAIN]` lines appearing and nothing else. It is stated here as the best-supported explanation rather than as a directly observed one, because the simulator's internal register state cannot be inspected from outside. Section 7.5 describes the instrumentation that was added to make this class of failure observable rather than silent.
 
@@ -590,57 +594,90 @@ Four further defects surfaced while validating this driver under simulation:
 
 *The polling guard was shorter than the protocol.* Each level poll used a `uint8_t` counter bounded at 100 iterations. Polling a GPIO through the HAL at 72 MHz costs roughly 6-8 cycles per iteration, so 80 µs — the longest level the sensor holds during a frame — spans several hundred iterations. The guard therefore expired mid-frame and returned `DHT22_TIMEOUT` on every read. The bound is now `DHT22_EDGE_TIMEOUT` (2000), which comfortably outlasts any legal level while still terminating on a disconnected or held line.
 
-**Challenge 4: The scheduler never started — a simulator deviation in the FreeRTOS port.**
+**Challenge 4: The scheduler never started — SysTick gated permanently by a pre-scheduler critical section.**
 
 This was the defect that actually produced the reported symptom, and it was the hardest to find because every layer above it was correct.
 
-*Symptom.* After a successful build, a Wokwi run produced exactly two lines of serial output — `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — and then nothing. No task banner, no `[SENSOR]` line, no OLED content, no LED activity. Both lines that did appear are printed from `main()` *before* `vTaskStartScheduler()` is called. The boundary between "output appears" and "output stops" therefore falls exactly at the scheduler start, which localises the fault to the port layer rather than to any task, driver, or peripheral.
+*Symptom.* After a successful build, a run produced three lines of serial output — `[DIAG] VTOR … vectors-ok`, `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — and then nothing. No task banner, no `[SENSOR]` line, no OLED content, no LED activity. Every line that did appear is printed from `main()` *before* `vTaskStartScheduler()`. The boundary between "output appears" and "output stops" therefore fell exactly at the scheduler start, which localised the fault to the port layer rather than to any task, driver, or peripheral.
 
 *Why the obvious explanations were eliminated.* Each of the following was checked and ruled out, which is what narrowed the search to the port:
 
 - **Wiring.** All 25 connections in `diagram.json` use short-form labels and resolve to real pins; the I2C1 pins (PB6/PB7) and USART1 pins (PA9/PA10) match the MSP init functions, and the OLED address `0x3c` matches `OLED_I2C_ADDR`.
-- **Clock configuration.** The two `[MAIN]` lines are legible at 115200 baud. That single observation proves both that the HSE oscillator started and the PLL locked at 72 MHz, and that the PCLK2-derived UART divisor is correct. A clock failure would have routed into the inlined `Error_Handler()` before any output appeared at all.
-- **Heap exhaustion.** `configTOTAL_HEAP_SIZE` is 12,288 B against a measured demand of roughly 10.0–10.2 KB, leaving about 2 KB of headroom, and `vTaskStartScheduler()` returning on failure would have been caught by the post-scheduler guard added in section 7.5.
+- **Clock configuration.** The boot lines are legible at 115200 baud. That single observation proves that the HSE oscillator started, that the PLL locked at 72 MHz, and that the PCLK2-derived UART divisor is correct. It is also why the firmware cannot be described as "stuck in `HAL_RCC_OscConfig()`": `HSE_STARTUP_TIMEOUT` is 100 ms, after which the HAL takes the HSI fallback rather than spinning.
+- **Heap exhaustion.** `configTOTAL_HEAP_SIZE` is 12,288 B against a measured demand of roughly 10.0–10.2 KB, leaving about 2 KB of headroom, and a failed `vTaskStartScheduler()` would have been caught by the post-scheduler guard added in section 7.5.
 - **Interrupt priority assertions.** The ISRs that call `...FromISR` are EXTI2/EXTI4 at HAL priority 5 and EXTI0 at priority 6, both at or below the `configMAX_SYSCALL_INTERRUPT_PRIORITY` ceiling of raw `0x50`, and the port's own AIRCR priority-group check passes because the STM32F103 implements 4 priority bits. An earlier hypothesis that a SysTick priority assertion was trapping the boot was investigated and **refuted**: `xPortStartScheduler()` explicitly ORs `0xFF` over the SysTick priority byte to force it to the lowest priority, so the value it asserts on is the one it just wrote.
 - **Vector table relocation.** The framework's `SystemInit()` is compiled down to a bare `bx lr` — disassembly of `FrameworkCMSISDevice/system_stm32f1xx.o` shows the entire function body is the two bytes `4770` — so nothing in the stock boot path ever programs `VTOR`, which keeps its reset value of 0. A scan of the linked image finds the `0xE000ED08` literal in exactly two places, both of them loads inside the FreeRTOS port, and no store to it anywhere. This is a real latent defect, because FreeRTOS V11 defaults `configCHECK_HANDLER_INSTALLATION` to 1 and the check it performs reads the vector table *through* `VTOR` to confirm that vectors 11 and 14 are the port's own SVC and PendSV handlers. On a Blue Pill with BOOT0 tied low, address 0 aliases flash, so the check passes by luck; where that alias is absent the core would fetch the table from unmapped memory. It is fixed by the explicit relocation described in section 7.5, but it is **not** the cause of the observed symptom, because the alias is present in the simulator.
 
-*Leading hypothesis.* The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` ends with a sequence that clears the interrupt masks and then issues the supervisor call that starts the first task:
+*How the cause was actually found.* With the error-reporting paths, the vector table and the clock all excluded, the search moved to observing the failing hardware state directly. A first attempt to do this against Wokwi was abandoned — hardware watchpoints are unsupported by its GDB stub — so the firmware was instead run under **Renode 1.17.0**, which models the Cortex-M3, the NVIC, SysTick and USART faithfully and permits the CPU and memory to be inspected mid-run. Sampling the frozen system produced the answer immediately:
 
-```asm
-cpsie i          ; clear PRIMASK  -- enable interrupts
-cpsie f          ; clear FAULTMASK
-dsb
-isb
-svc 0            ; start the first task
+| Address | Symbol | Observed | Expected if healthy |
+|---|---|---|---|
+| `0x20000008` | `uxCriticalNesting` | `0xAAAAAAAA` in every sample | `0` once scheduling |
+| `0x20003DAC` | `uwTick` | frozen at `0x00000003` | advancing at 1 kHz |
+| `0xE000E010` | `SysTick->CTRL` | `0x00010005` — `TICKINT` **clear** | `0x00000007` |
+| — | Program counter | `0x8001124`–`0x800114C` (`HAL_Delay` wait loop) | anywhere else |
+
+*Root cause.* The port cannot use `BASEPRI` to exclude the tick (Wokwi does not implement it), so it excludes the tick at its source instead: `vPortEnterCritical()` clears `SysTick->CTRL.TICKINT`, and `vPortExitCritical()` restores it **only when the nesting counter returns to exactly zero**:
+
+```c
+static UBaseType_t uxCriticalNesting = 0xaaaaaaaa;   /* "kernel not started" sentinel */
+
+void vPortEnterCritical( void ) { vPortGateTick(); uxCriticalNesting++; }
+void vPortExitCritical( void )  { uxCriticalNesting--; if( uxCriticalNesting == 0 ) vPortUngateTick(); }
 ```
 
-On real ARMv7-M hardware, `cpsie i` clears `PRIMASK` and `cpsie f` clears `FAULTMASK`. Wokwi's Cortex-M3 model is believed to implement these instructions with the opposite effect: they **set** the masks instead of clearing them. The consequence would be that `PRIMASK` is left at 1 when the `svc 0` executes, and `SVCall` is a configurable-priority exception, so it is masked by `PRIMASK`. The supervisor call would never fire, the first task would never be entered, and the system would sit in the idle loop of `xPortStartScheduler()` forever — with interrupts masked, so no tick, no context switch, and no output.
+`uxCriticalNesting` is initialised to `0xaaaaaaaa`, not `0`, precisely to mark that the kernel does not exist yet. Taken against that sentinel the counter walks `0xAAAAAAAA → 0xAAAAAAAB → 0xAAAAAAAA` and **never reaches zero**, so the first critical section taken before the scheduler starts closes the tick gate and nothing ever reopens it. Only `xPortStartScheduler()` writes `uxCriticalNesting = 0`, and the firmware hung before reaching it.
 
-> **Evidence status.** The mechanism above is the **leading hypothesis**, not a confirmed
-> cause. It is supported by reasoning and by object-code inspection, but the faulting
-> instruction was never observed directly: hardware watchpoints are unsupported by the
-> Wokwi GDB stub and the 1 kHz SysTick starves an attached session, so a debugger could not
-> be used to inspect `PRIMASK` at the point of failure. Read the sections below with that
-> in mind — in particular, *Replay against the current revision*.
+The trigger is this application's use of FreeRTOS before the scheduler exists. `main()` calls `UART_Mutex_Init()` (which reaches `xSemaphoreCreateMutex()` → `xQueueGenericCreate()` → `xQueueGenericReset()`) and then five `xTaskCreate()` calls, all before `vTaskStartScheduler()`. Those kernel functions take a critical section, and because `queue.c` and `tasks.c` compile against the project's patched `portmacro.h` they reach the gating implementation. So the very first FreeRTOS object created permanently gated the tick, and `OLED_Init()`'s `HAL_Delay(100)` — which waits on the tick — then spun forever. A trace at 4 µs resolution pinned the transition between 128 µs and 428 µs of simulated time: `CTRL` reads `0x00000007` at 128 µs (`HAL_InitTick` arming SysTick) and `0x00000005` at 428 µs (already inside the `HAL_Delay` wait loop) — the gate closed while the mutex was being created, exactly as the analysis predicts.
 
-The hypothesis accounts for the symptom set, including the detail that made it confusing: the three boot lines appear because they are emitted before the scheduler starts, and everything after that point is silent because nothing after that point runs. Note the limit of that reasoning, however: all three emitted lines are written *before* `vTaskStartScheduler()`, whereas every `[TASK] <name> entered` banner is written from inside a task through the mutex-and-HAL logging path. A break *after* the scheduler starts but *before* that path becomes usable would produce the identical observable output. The boot log alone cannot distinguish the two.
+*The fix.* Both critical-section primitives now defer to the scheduler state before touching the gate:
 
-*Replay against the current revision.* The simulation was re-executed against the current build, repeatedly and reproducibly, with no debugger attached. It does **not** show a running system — the three boot lines appear and then the output stops, with no task banner, no OLED frame and no LED activity. What that establishes and what it does not is recorded in full under L-07 in `docs/limitations.md`; in summary, the patched port is confirmed present in the linked image and the vector table is confirmed correct at runtime (`vectors-ok`), every instrumented failure path is excluded by the absence of its log line, but **neither the task execution nor the `cpsie` mechanism was observed directly**. The patch is therefore necessary-but-unproven, and the workaround as it stands does not produce a visibly running system in Wokwi.
-
-*The fix.* The project carries a local copy of the port at `lib/freertos_port_patch/src/port.c`, which is the stock V11.3.1 ARM_CM3 port with three instructions added before the `svc`:
-
-```asm
-movs r0, #0
-msr primask, r0      ; clear PRIMASK explicitly
-msr faultmask, r0    ; clear FAULTMASK explicitly
-svc 0
+```c
+void vPortEnterCritical( void )
+{
+    if( xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED )
+    {
+        return;
+    }
+    vPortGateTick();
+    uxCriticalNesting++;
+}
 ```
 
-`msr` is the architecturally correct way to clear these masks, and on real hardware the added instructions are redundant no-ops that leave the register state identical to what `cpsie` would have produced. The `cpsie` instructions are deliberately **kept** rather than removed, so the port remains correct on genuine silicon and the deviation is confined to three instructions that are harmless there. The library's `library.json` sets `"libArchive": false`, which links the patched `port.o` as a plain object rather than an archive member; a duplicate symbol then fails the link loudly instead of silently falling back to the unpatched copy in the FreeRTOS archive. `tools/verify/check_port_patch.py` runs as a post-build action and prints a warning if the patched object is missing from the build directory, so the silent-fallback failure mode is itself made visible.
+with a mirrored early return in `vPortExitCritical()`. This is safe: before the scheduler starts there is exactly one execution context (`main()`), no task exists that could observe a kernel structure concurrently, and `SysTick_Handler()` already routes the `taskSCHEDULER_NOT_STARTED` case to `vApplicationTickHook()` only (`HAL_IncTick()`), never touching a kernel list — so the gate protects nothing during that window. The two early returns are symmetrical, so `uxCriticalNesting` remains at the `0xaaaaaaaa` sentinel, which is exactly its documented meaning. `xTaskGetSchedulerState()` compiles to a plain global read at `configNUMBER_OF_CORES == 1`, so calling it inside the primitive is safe and cheap.
 
-*Why the port is patched rather than the application.* The defect is in the simulator's instruction semantics, not in this project's code, so there is no application-level change that can address it. The alternative — adopting the reference implementation's entire custom port, which replaces the PendSV-based context switch with a SysTick-driven one and reimplements the critical-section primitives — was rejected because that port targets FreeRTOS V10.3.1 and would forfeit V11 behaviour including `configCHECK_HANDLER_INSTALLATION` and the V11 SVC/PendSV handler naming. Patching three instructions in the project's own V11 port keeps the kernel version, the configuration, and every other port behaviour unchanged.
+*Replay against the fixed revision.* The same Renode harness, re-run against the fixed build, now shows a running system. `uwTick` advances (`0x00000023 → 0x00000382` across 88 ms of simulated time), `SysTick->CTRL` stays at `0x00000007` and is never left gated, `uxCriticalNesting` settles at `0`, and the program counter is visibly inside `prvIdleTask` and `prvCheckTasksWaitingTermination`. The serial port emits, in order:
 
-*Two further simulator deviations, documented but not worked around.* Wokwi's Cortex-M3 model also does not implement `BASEPRI`, and its `PRIMASK`/`FAULTMASK` do not block SysTick. The first of these means that `portDISABLE_INTERRUPTS()` and `portENABLE_INTERRUPTS()` — which the V11 port implements by writing `BASEPRI` — have no effect in the simulator, so critical sections are not genuinely protected there. This does not affect the correctness of the firmware on real hardware, where `BASEPRI` works as specified, but it does mean that any concurrency defect that depends on a critical section would not be caught by a Wokwi run. It is recorded as limitation L-08 in section 7.2.
+```
+[DIAG] VTOR was 0x08000000, now 0x08000000; vec[11]=0x08002B99 vec[14]=0x0800815D vectors-ok
+[OLED] init failed: no ACK from 0x3C
+[MAIN] System initialized
+[MAIN] Starting FreeRTOS scheduler
+[TASK] InputTask entered
+[TASK] MotionTask entered
+[TASK] AlarmTask entered
+[TASK] SensorTask entered
+[TASK] DisplayTask entered
+[OLED] frame transfer failed (panel not ACKing)
+[SENSOR] DHT22 read error
+[SENSOR] LDR read error
+[SENSOR] T=nanC H=nan% L=0 M=0
+```
+
+All five tasks are entered and the sensor task repeats, which demonstrates the tick, preemptive context switching and the task bodies all executing. The `[OLED]` and `[SENSOR]` errors are correct behaviour for a Renode run, which models neither the SSD1306 nor the DHT22/LDR; they are the fault-reporting paths added under section 7.5, and their appearance is what proves those paths work.
+
+*Two further real defects found by the same replay.* Both were invisible to Wokwi and to the native tests, and both are now fixed:
+
+- **A yield through PendSV.** `main.c` compiles with the FreeRTOS library's *stock* `portmacro.h` ahead of the project `include/`, because PlatformIO places library directories first in the include path — the ordering is per-translation-unit and `-Iinclude` cannot override it. The stock `portYIELD_FROM_ISR()` therefore became the real definition in `HAL_GPIO_EXTI_Callback`, storing `PENDSVSET` to the ICSR at `0xE000ED04` — but this port deliberately never services PendSV, and no strong `PendSV_Handler` is defined, so the weak alias in the startup file would have vectored any external-interrupt yield straight into `Default_Handler` and looped forever. The evidence was subtle: `vPortYieldFromISR` was absent from the symbol table entirely, dead-code-eliminated because nothing referenced it. `main.c` now declares `extern void vPortYieldFromISR(void);` and calls it directly, the only way to bypass the stock header. Disassembly confirms the image contains zero `0xE000ED04` stores where it previously contained one, and `vPortYieldFromISR` is now present. `tools/verify/check_port_patch.py` asserts both conditions on every build.
+- **A mutex used before it existed.** `main()` reported an OLED failure through `UART_Mutex_Printf(&uart_mutex, …)` before `UART_Mutex_Init(&uart_mutex, &huart1)` had run, so `uart_mutex.mutex` was still `NULL` and the kernel took `xQueueSemaphoreTake(NULL)`, tripping `configASSERT( ( pxQueue ) );` at `queue.c:1673` instead of printing the message. This was invisible on Wokwi — the panel is present there, so the failure branch never executes — and surfaced only in Renode, where the absent SSD1306 takes it. The mutex is now created before any code path that can report a fault.
+
+A third, smaller hazard was fixed alongside them: `OLED_SendCommand()` and the bulk transfer in `OLED_Update()` passed `HAL_MAX_DELAY` to `HAL_I2C_Master_Transmit()`, so a panel that never acknowledges would block the caller forever — and because `OLED_Init()` runs before the scheduler starts, that wedged the whole application with no diagnostic at all, which also made the newly added `[OLED] init failed` message unreachable. Both call sites now use `OLED_I2C_TIMEOUT_MS` (50 ms, roughly 50× the worst-case transfer at 100 kHz), and `OLED_Update()` returns early once the address-window commands fail so a dead panel costs one timeout rather than six.
+
+*A correction to earlier revisions of this report.* Previous revisions recorded the `cpsie`/`PRIMASK` hypothesis as the leading explanation for this symptom. That hypothesis was **wrong** and is withdrawn: the cause is the critical-section/SysTick gate established above by direct register observation. The three-instruction `msr` workaround in `prvPortStartFirstTask()` is retained because it is harmless on genuine silicon, but it was never the fix. The port as a whole was **adopted** from the reference implementation's design — a SysTick-driven context switch with no PendSV — rather than rejected as earlier revisions stated; the reference's `vPortEnterCritical()`/`vPortExitCritical()` are byte-identical to the ones used here.
+
+*Why the reference implementation is unaffected.* The reference carries the same latent flaw and is only *accidentally* immune: its `main.cpp` creates its mutex and sensor queue and calls `vTaskStartScheduler()` with no `HAL_Delay` and no other HAL-tick dependency in between — there is no `HAL_Delay` anywhere in its `src/`. Nothing that needs the tick runs while the tick is gated, so the permanent gate costs it nothing. This application does need the tick before the scheduler, so the same defect is fatal here.
+
+*One simulator deviation remains, documented and accepted.* Wokwi's Cortex-M3 model does not implement `BASEPRI`, so `portDISABLE_INTERRUPTS()`/`portENABLE_INTERRUPTS()` have no effect there and critical sections are not genuinely protected. This does not affect correctness on real hardware, where `BASEPRI` works as specified, but it does mean a concurrency defect that depends on a critical section would not be caught by a Wokwi run. It is recorded as limitation L-08 in section 7.2, and it is the reason this port gates the tick at its source rather than through the CPU mask.
 
 ### 7.4 Alternative Approaches Considered
 
@@ -676,7 +713,7 @@ The relocation deliberately does **not** take the form of a function named `Syst
 
 The polarity is worth stating explicitly because it is a real defect that the documentation caught: the LED was first added wired active-high (`PC13` → resistor → anode → GND), which is the reverse of the board it is meant to simulate. Since the firmware drives `PC13` high at boot, the simulated LED would have been **lit during normal operation** and **dark during a fault** — exactly the inverse of what is wanted, and the opposite of what this report claimed. Wiring it active-low makes the simulated indication agree with the physical board and with the firmware's own polarity.
 
-**A guard against silent fallback.** `tools/verify/check_port_patch.py` runs as a post-build action and verifies that the patched port object is present in the build directory, printing a warning if it is not. Without this, a change to the library configuration could silently revert the port to the unpatched archive member and reintroduce Challenge 4 with no visible sign.
+**A guard against silent fallback.** `tools/verify/check_port_patch.py` runs as a post-build action and verifies four things: that the patched port object is present in the build directory; that `include/portmacro.h` still redirects every macro the kernel core needs; that the linked image contains **no** store to the ICSR at `0xE000ED04` (the `PendSV`-yield escape described in Challenge 4); and that both critical-section primitives still carry the pre-scheduler guard. It prints a warning rather than failing the build, so that a broken check cannot itself block a compile. All four conditions were confirmed to fail correctly when deliberately broken. Without this, a change to the library configuration could silently revert the port to the unpatched archive member and reintroduce Challenge 4 with no visible sign.
 
 The instrumentation is deliberately dependency-free: `diag.c` includes only `<stdint.h>` and does not use the HAL, FreeRTOS, or the C library, so it remains usable in exactly the situations where those layers are suspect. It adds 1,216 B of `.text` and 36 B of `.bss`, measured with `tools/verify/run_size_analysis.sh`.
 
@@ -688,17 +725,19 @@ The BCA182 Room Monitoring System implements a production-quality real-time embe
 architecture using FreeRTOS on the STM32F103C8T6. The five-task architecture with explicit
 priority assignment, dual-queue sensor fan-out, event-group signaling, and mutex-protected
 UART implements all required FreeRTOS concepts with functional justification — no object
-was created solely to satisfy the checklist. The design and the hardware-independent logic
-are fully verified; the on-target runtime behaviour is the one item that is not, for the
-reason recorded in the last key outcome below.
+was created solely to satisfy the checklist. The design, the hardware-independent logic, and
+the scheduler's runtime behaviour are all verified: the boot hang that once left the
+firmware silent has been root-caused, fixed, and replayed successfully, with all five tasks
+observed running. Physical-hardware validation remains the one item that has not been
+carried out, for the reason recorded in the last key outcome below.
 
 **Key outcomes:**
 - All 10 functional requirements (FR-01 through FR-10) are implemented
 - 33 automated unit tests pass on the native host PC (hardware-independent); these were re-run against the current revision and all pass
-- The 10 Wokwi functional checks (WF-01 through WF-10) are documented in section 5.2 as development-time observations. Their expected outcomes were verified line by line against the source, and the runs were subsequently replayed against the current revision with the Wokwi toolchain — where **none of them reproduced**: the session stops after the three boot lines and no task is started, so no peripheral interaction occurs. The WF table therefore records the original observations and is not a current result
+- The 10 Wokwi functional checks (WF-01 through WF-10) are documented in section 5.2 as development-time observations. Their expected outcomes were verified line by line against the source. A replay against the revision that still contained the scheduler hang reproduced **none** of them; that hang has since been root-caused and fixed (Challenge 4), and a replay of the fixed firmware under Renode shows the scheduler starting and all five tasks running. The WF table therefore records the original per-peripheral observations and is not a current Wokwi result
 - Static analysis found 0 functional defects across all passes; 21 LOW-severity clang-tidy advisories, 1 compiler warning, and 2 benign memory-mapped-register findings were reviewed and accepted; all re-verified on the current revision
 - 3 fault experiments reasoned through against the scheduler rules and checked against the source (section 5.3); their `Predicted result` paragraphs are derived consequences of the configuration, not measurements
-- The blank-OLED / silent-terminal symptom was traced to a suspected deviation in the simulator's Cortex-M3 instruction semantics, isolated to three instructions in the FreeRTOS port, and worked around without changing the kernel version or any application code (Challenge 4, section 7.3). **Both halves of that finding are qualified:** the mechanism is a leading hypothesis rather than an observed cause, and the workaround does not produce a visibly running system — a replay against the current revision still stops after the boot lines. This is the principal open item in the project
+- The silent-terminal symptom was root-caused to a critical section taken before `vTaskStartScheduler()`, which permanently closed the port's SysTick gate (`uxCriticalNesting` never returned from its `0xaaaaaaaa` sentinel to 0), and fixed by deferring both critical-section primitives while the scheduler is not started. **Replayed and verified under Renode:** `uwTick` advances, SysTick is never left gated, and all five tasks are entered (Challenge 4, section 7.3). Two further real defects surfaced in the same replay and are also fixed: a yield through PendSV compiled against the stock `portmacro.h`, and a UART mutex reported through before it was created.
 - The firmware was hardened so that a boot failure is no longer silent: a fault handler that decodes and reports the exception frame, a relocated vector table, captured task-creation return codes, and a visible fault LED (section 7.5)
 
 **Lessons learned:**
@@ -709,7 +748,10 @@ reason recorded in the last key outcome below.
 5. Every task must contain at least one blocking call to enable cooperative operation of lower-priority tasks
 6. A silent failure is worse than a loud one. On Cortex-M the default fault handlers are infinite loops, so a faulting board and a hung board look identical; installing a handler that reports the fault status registers converts an unobservable failure into a diagnosable one
 7. A commit message that claims a verified result which was never actually observed is a liability. The `647b343` claim that the OLED rendered in Wokwi was carried in this report for several revisions before the pin-label defect that invalidated it was found (Challenge 2, section 7.3)
-8. When a symptom stops exactly at a known boundary — here, at the call to `vTaskStartScheduler()` — that boundary is the most valuable diagnostic clue available, and it is worth eliminating every layer above it before suspecting the layer below
+8. When a symptom stops exactly at a known boundary — here, at the call to `vTaskStartScheduler()` — that boundary is the most valuable diagnostic clue available, and it is worth eliminating every layer above it before suspecting the layer below. It localised this fault to the port within one pass.
+9. When the only available simulator cannot expose the state you need, change simulators rather than reasoning harder. The cause of this hang was invisible in Wokwi — its GDB stub has no hardware watchpoints, so the CPU could not be inspected at the point of failure — and was found within minutes under Renode, which permits registers and memory to be read mid-run. Two further real defects (a `PendSV` yield compiled against the stock header, and a mutex used before it was created) surfaced in the same session. Treat a second, independent execution environment as a debugging instrument, not as a redundancy.
+10. An implementation that "works" is not evidence that its design is sound. The reference implementation this project was compared against carries the *same* latent critical-section flaw; it survives only because it never calls `HAL_Delay` before starting its scheduler. Reproducing a working example verbatim would have carried the defect across rather than fixing it.
+11. Instrumented failure paths have to be tested by triggering them. The `[OLED] init failed` message added to report display faults was itself faulting — it ran before its mutex existed and tripped a kernel assert. It looked correct for two revisions because the condition that would exercise it (an absent panel) never occurred in the simulator being used.ting the layer below
 
 **Future improvements:**
 - Add SD card data logging (SPI + FAT filesystem)

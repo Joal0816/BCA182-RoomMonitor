@@ -6,3 +6,6 @@
 # Python bytecode from the verification scripts
 __pycache__/
 *.pyc
+
+# PlatformIO-generated compile database (large, machine-specific)
+compile_commands.json

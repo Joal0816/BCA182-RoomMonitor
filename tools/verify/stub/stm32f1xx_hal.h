@@ -14,7 +14,7 @@ extern DWT_Type *DWT;
 
 typedef struct { uint32_t Pin; uint32_t Mode; uint32_t Pull; uint32_t Speed; } GPIO_InitTypeDef;
 typedef struct { uint32_t ClockType; uint32_t SYSCLKSource; uint32_t AHBCLKDivider; uint32_t APB1CLKDivider; uint32_t APB2CLKDivider; } RCC_ClkInitTypeDef;
-typedef struct { uint32_t OscillatorType; uint32_t HSEState; uint32_t HSEPredivValue; RCC_PLLInitTypeDef PLL; } RCC_OscInitTypeDef;
+typedef struct { uint32_t OscillatorType; uint32_t HSEState; uint32_t HSEPredivValue; uint32_t HSIState; uint32_t HSICalibrationValue; RCC_PLLInitTypeDef PLL; } RCC_OscInitTypeDef;
 typedef struct { uint32_t Prescaler; uint32_t CounterMode; uint32_t Period; uint32_t ClockDivision; uint32_t AutoReloadPreload; } TIM_Base_InitTypeDef;
 typedef struct { uint32_t OCMode; uint32_t Pulse; uint32_t OCPolarity; uint32_t OCFastMode; } TIM_OC_InitTypeDef;
 typedef struct { uint32_t ClockSpeed; uint32_t DutyCycle; uint32_t OwnAddress1; uint32_t AddressingMode; uint32_t DualAddressMode; uint32_t OwnAddress2; uint32_t GeneralCallMode; uint32_t NoStretchMode; } I2C_InitTypeDef;
@@ -82,9 +82,13 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define UART_HWCONTROL_NONE 0U
 #define UART_OVERSAMPLING_16 0U
 #define RCC_OSCILLATORTYPE_HSE 1U
+#define RCC_OSCILLATORTYPE_HSI 2U
 #define RCC_HSE_ON 1U
 #define RCC_HSE_PREDIV_DIV1 0U
+#define RCC_HSI_ON 1U
+#define RCC_HSICALIBRATION_DEFAULT 0x10U
 #define RCC_PLL_ON 1U
+#define RCC_PLL_NONE 0U
 #define RCC_PLLSOURCE_HSE 1U
 #define RCC_PLL_MUL9 9U
 #define RCC_CLOCKTYPE_SYSCLK 1U
@@ -92,6 +96,7 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define RCC_CLOCKTYPE_PCLK1 4U
 #define RCC_CLOCKTYPE_PCLK2 8U
 #define RCC_SYSCLKSOURCE_PLLCLK 1U
+#define RCC_SYSCLKSOURCE_HSI 0U
 #define RCC_SYSCLK_DIV1 0U
 #define RCC_HCLK_DIV1 0U
 #define RCC_HCLK_DIV2 1U
@@ -100,6 +105,7 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define I2C_GENERALCALL_DISABLE 0U
 #define I2C_NOSTRETCH_DISABLE 0U
 #define I2C_DUTYCYCLE_2 0U
+#define FLASH_LATENCY_0 0U
 #define FLASH_LATENCY_2 2U
 #define HAL_MAX_DELAY 0xFFFFFFFFU
 

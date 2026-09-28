@@ -36,10 +36,19 @@
 #define DIAG_MMFAR_ADDR     0xE000ED34UL
 #define DIAG_BFAR_ADDR      0xE000ED38UL
 
-/* Slots 11 and 14 hold SVCall and PendSV -- the two the FreeRTOS Cortex-M port
-   validates in xPortStartScheduler() when configCHECK_HANDLER_INSTALLATION is
-   1.  That macro is not defined in this project's FreeRTOSConfig.h, so it
-   defaults to 1 and the check is live. */
+/* Slots 11 and 14 hold SVCall and PendSV.
+ *
+ * The project-local Cortex-M port in lib/freertos_port_patch/src/port.c owns
+ * slot 11: it installs its own SVC_Handler and dispatches every yield and every
+ * first-task start through `svc`.  It deliberately installs no PendSV handler
+ * at all -- there is no asynchronous context-switch path -- so slot 14 keeps
+ * the startup file's weak PendSV_Handler -> Default_Handler alias.
+ *
+ * FreeRTOS's handler-installation check is therefore disabled in this project
+ * (configCHECK_HANDLER_INSTALLATION == 0 in FreeRTOSConfig.h), and slot 14 is
+ * reported for information only.  Slot 11 is still worth checking: if it does
+ * not point at the port's own SVC_Handler, the first `svc` would land in
+ * Default_Handler and the board would stop talking on the spot. */
 #define DIAG_VECTOR_SVC     11U
 #define DIAG_VECTOR_PENDSV  14U
 
@@ -198,19 +207,22 @@ void Diag_RelocateVectors(void)
        exactly two places, both of them `ldr` in the FreeRTOS port, and no
        store to it anywhere.
 
-       That matters here because FreeRTOS V11 defaults
-       configCHECK_HANDLER_INSTALLATION to 1, and the check it performs reads
-       the vector table through portSCB_VTOR_REG (0xE000ED08) to confirm that
-       vector[11] and vector[14] are the port's own SVC and PendSV handlers.
-       With VTOR left at 0 the check is reading whatever the part happens to
-       alias at address 0.  On a Blue Pill with BOOT0 tied low that alias is
-       flash, so the check passes by luck; where the alias is absent the core
-       fetches the table from unmapped memory and the board presents as
-       completely dead with no UART output at all.
+       That mattered when FreeRTOS V11's default handler-installation check
+       (configCHECK_HANDLER_INSTALLATION == 1) was live: it reads the vector
+       table through portSCB_VTOR_REG (0xE000ED08) to confirm that vector[11]
+       and vector[14] are the port's own SVC and PendSV handlers.  With VTOR
+       left at 0 the check is reading whatever the part happens to alias at
+       address 0.  On a Blue Pill with BOOT0 tied low that alias is flash, so
+       the check passes by luck; where the alias is absent the core fetches the
+       table from unmapped memory and the board presents as completely dead with
+       no UART output at all.
 
-       Setting VTOR explicitly makes the image correct either way, and is what
+       This project now defines configCHECK_HANDLER_INSTALLATION 0, because its
+       port owns SVC and installs no PendSV handler at all, so the check no
+       longer applies.  Setting VTOR explicitly is still correct and still what
        the reference implementation this project was compared against does
-       (SCB->VTOR = FLASH_BASE before app_main()).
+       (SCB->VTOR = FLASH_BASE before app_main()): the vector table must be
+       reachable for the SVC the port issues.
 
        Runs at the top of main(), before HAL_Init() and long before
        xPortStartScheduler() reads the table, so it does its own address
@@ -243,12 +255,13 @@ void Diag_DumpVectorInfo(void)
     Diag_Puts(" vec[14]=");
     Diag_PutHex(pendsv);
 
-    /* Both slots must hold real flash addresses.  With VTOR left at 0 and no
-       flash alias present in the simulator, these read as garbage and the
-       FreeRTOS handler-installation assert fires -- which it does silently,
-       leaving the board looking dead.  Printing the values means that assert
-       can be predicted from the log instead of inferred from a board that
-       simply stops talking. */
+    /* Both slots must hold real flash addresses.  The port's own SVC_Handler is
+       what slot 11 must resolve to -- if it does not, the first `svc` the
+       scheduler issues lands in Default_Handler and the board stops talking on
+       the spot.  Slot 14 is informational: the port installs no PendSV handler,
+       so it holds the startup file's weak PendSV_Handler alias of
+       Default_Handler, which still lives in flash.
+    */
     ok = (svc >= DIAG_FLASH_BASE) && (svc < DIAG_FLASH_END) &&
          (pendsv >= DIAG_FLASH_BASE) && (pendsv < DIAG_FLASH_END);
 

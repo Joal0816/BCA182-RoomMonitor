@@ -1,7 +1,7 @@
 {
     "name": "freertos_port_patch",
-    "version": "11.3.1-wokwi.1",
-    "description": "FreeRTOS Kernel V11.3.1 ARM_CM3 port with a PRIMASK/FAULTMASK workaround for the Wokwi simulator, whose `cpsie` sets those mask bits instead of clearing them. Without it, the `svc 0` at the end of prvPortStartFirstTask is masked and the first task never starts. Not archived, so its port.o is linked as an object and the FreeRTOS library archive's own port.o is never pulled in; if any port symbol were missing here, the link would fail with a duplicate definition instead of silently using the unpatched port.",
+    "version": "11.3.1-wokwi.2",
+    "description": "FreeRTOS Kernel V11.3.1 port for the Wokwi simulator. Replaces the stock ARM_CM3 port's PendSV/BASEPRI machinery with something the simulator executes correctly: no PendSV handler at all (context switches are taken synchronously in the SVC handler), and critical sections gate the SysTick interrupt in CTRL rather than raising BASEPRI, which Wokwi does not implement. A DWT cycle counter is used on entry and exit so ticks missed inside a critical section are replayed through xTaskIncrementTick(). vPortSetupTimerInterrupt() is deliberately weak so the application or another library can override the tick period. The companion header include/portmacro.h redirects portYIELD/portENTER_CRITICAL to these entry points for the kernel core. Not archived, so its port.o is linked as an object and the FreeRTOS library archive's own port.o is never pulled in; if any port symbol were missing here, the link would fail with a duplicate definition instead of silently using the unpatched port.",
     "frameworks": "stm32cube",
     "platforms": "ststm32",
     "build": {

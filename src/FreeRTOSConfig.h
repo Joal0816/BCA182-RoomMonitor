@@ -1,6 +1,12 @@
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
+/* SystemCoreClock is maintained by the CMSIS device code (system_stm32f1xx.c)
+   and updated by HAL_RCC_ClockConfig(), so the tick period follows whatever
+   clock SystemClock_Config() actually achieved -- including the 8 MHz HSI
+   fallback -- without this file having to be kept in sync by hand. */
+extern uint32_t SystemCoreClock;
+
 /*-----------------------------------------------------------
  * Application specific definitions.
  *
@@ -37,7 +43,7 @@
 #define configUSE_PREEMPTION                    1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 0
 #define configUSE_TICKLESS_IDLE                 0
-#define configCPU_CLOCK_HZ                      72000000UL
+#define configCPU_CLOCK_HZ                      ( SystemCoreClock )
 #define configTICK_RATE_HZ                      1000
 #define configMAX_PRIORITIES                    5
 #define configMINIMAL_STACK_SIZE                128
@@ -54,7 +60,7 @@
 
 /* Hook functions */
 #define configUSE_IDLE_HOOK                     0
-#define configUSE_TICK_HOOK                     0
+#define configUSE_TICK_HOOK                     1
 #define configCHECK_FOR_STACK_OVERFLOW          2
 #define configUSE_MALLOC_FAILED_HOOK            1
 #define configUSE_DAEMON_TASK_STARTUP_HOOK      0
@@ -102,10 +108,11 @@
 #define INCLUDE_uxTaskGetStackHighWaterMark     0
 #define INCLUDE_eTaskGetState                   0
 
-/* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
-   standard names. */
-#define vPortSVCHandler    SVC_Handler
-#define xPortPendSVHandler PendSV_Handler
+/* The patched port (lib/freertos_port_patch/src/port.c) defines the CMSIS-named
+   handlers SVC_Handler and SysTick_Handler directly, and never installs a PendSV
+   handler, so the library's vPortSVCHandler/xPortPendSVHandler aliases are not
+   needed here. */
+#define configCHECK_HANDLER_INSTALLATION        0
 
 /* Assert.
  *

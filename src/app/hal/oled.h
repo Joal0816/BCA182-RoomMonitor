@@ -7,6 +7,13 @@
 #define OLED_HEIGHT 64
 #define OLED_I2C_ADDR  0x3C
 
+/* Per-transaction I2C timeout.  This must be finite: with HAL_MAX_DELAY a
+   panel that never acknowledges (absent, unpowered, or a stuck bus) blocks
+   the caller forever, and since OLED_Init runs before the scheduler starts
+   the whole application wedges with no diagnostic.  50 ms is ~50x the
+   worst-case transfer time at 100 kHz, so a healthy panel never hits it. */
+#define OLED_I2C_TIMEOUT_MS  50
+
 typedef struct {
     I2C_HandleTypeDef *hi2c;
     uint8_t buffer[OLED_WIDTH * OLED_HEIGHT / 8];

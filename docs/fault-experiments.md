@@ -24,7 +24,7 @@ task cannot be starved by a priority-2 task"), it holds regardless of any partic
 > what was *seen* — a display updating, a buzzer sounding, a value on screen — is a
 > development-time note and must not be read as a reproducible result. A later replay
 > against the current revision did not reproduce any of them either: the session stops after
-> the three boot lines with no task running. Two findings in
+> its boot lines with no task running — a defect since fixed and replayed successfully. Two findings in
 > particular bound what could ever have been observed: the decimal values in
 > Experiment 1 needed `-Wl,-u,_printf_float` (see report §7.1 in
 > [`laboratory-report.md`](laboratory-report.md)), and no run could produce any task output

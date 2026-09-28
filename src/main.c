@@ -25,8 +25,6 @@
 #include "drivers/uart_mutex.h"
 #include "drivers/diag.h"
 
-extern void xPortSysTickHandler(void);
-
 /* Point VTOR at the vector table at 0x08000000.
  *
  * This cannot be done by defining a function named SystemInit(): the startup
@@ -49,6 +47,17 @@ extern void xPortSysTickHandler(void);
 static void App_RelocateVectors(void) {
     Diag_RelocateVectors();
 }
+
+/* Declared here rather than reached through portYIELD_FROM_ISR().  This file
+ * does not resolve include/portmacro.h: the FreeRTOS library puts its own
+ * portable/GCC/ARM_CM3 directory ahead of every -I path from build_flags, so
+ * src/main.c compiles against the stock header even though the patched port is
+ * the one that gets linked.  The stock portYIELD_FROM_ISR would therefore store
+ * PendSV-set to ICSR, and the patched port deliberately installs no PendSV
+ * handler -- the slot stays a weak alias of Default_Handler, which is an
+ * infinite loop, so the first PIR or encoder edge would wedge the MCU.  Calling
+ * vPortYieldFromISR() directly sidesteps header resolution entirely. */
+extern void vPortYieldFromISR(void);
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -96,15 +105,19 @@ int main(void) {
     MX_USART1_UART_Init();
 
     /* Latch the diagnostic register addresses before anything can fail, then
-       report where the vector table actually lives.  The FreeRTOS Cortex-M
-       port validates the SVCall and PendSV slots in xPortStartScheduler()
-       whenever configCHECK_HANDLER_INSTALLATION is enabled -- and it is
-       enabled here because the macro is simply absent from FreeRTOSConfig.h,
-       so it defaults to 1.  If those slots do not hold the handlers the port
-       expects, that assert spins forever in a silent loop with interrupts
-       masked.  This line makes the condition visible in the log first. */
+       report where the vector table actually lives.  The patched Cortex-M port
+       in lib/freertos_port_patch owns the SVC and SysTick slots directly and
+       does not install a PendSV handler, so FreeRTOS's handler-installation
+       check is disabled (configCHECK_HANDLER_INSTALLATION == 0).  This line
+       keeps the vector table visible in the log regardless. */
     Diag_Init();
     Diag_DumpVectorInfo();
+
+    /* The UART mutex must exist before anything can report a fault.  OLED_Init
+       below reports failures through it, so creating it afterwards leaves the
+       failure path calling xSemaphoreTake(NULL), which trips a FreeRTOS
+       configASSERT and hides the real message. */
+    UART_Mutex_Init(&uart_mutex, &huart1);
 
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
@@ -120,7 +133,6 @@ int main(void) {
 
     StateMachine_Init(&state_machine, INACTIVE_TIMEOUT_MS);
     Alarm_Init(&alarm, &buzzer);
-    UART_Mutex_Init(&uart_mutex, &huart1);
 
     sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
     display_sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
@@ -197,8 +209,34 @@ static void SystemClock_Config(void) {
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
     RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
     RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
+        /* No HSE crystal, so PLL x9 to 72 MHz is impossible.  Fall back to the
+           internal 8 MHz RC oscillator rather than halting: every clock in this
+           design (USART1 baud, I2C1 timing, TIM4 prescaler, the FreeRTOS tick)
+           is derived from SystemCoreClock, so firmware clocked at 8 MHz runs
+           correctly, just slower.  This is what makes the project survive a
+           board or simulator without a crystal. */
+        RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+        RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+        RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+        RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+        if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+            Error_Handler();
+        }
+
+        RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+                                    | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+        RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+        RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+        RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+        RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+        /* 8 MHz needs no wait states. */
+        if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK) {
+            Error_Handler();
+        }
+        return;
     }
 
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
@@ -359,15 +397,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     if (GPIO_Pin == GPIO_PIN_0) {
         PIR_EXTI_Callback(&pir);
         vTaskNotifyGiveFromISR(motion_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_2) {
         Encoder_CLK_EXTI_Callback(&encoder);
         vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     } else if (GPIO_Pin == GPIO_PIN_4) {
         encoder.button_pressed = 1;
         vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+
+    if (xHigherPriorityTaskWoken != pdFALSE) {
+        vPortYieldFromISR();
     }
 }
 
@@ -383,11 +422,16 @@ void EXTI4_IRQHandler(void) {
     HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
 }
 
-void SysTick_Handler(void) {
+/* HAL's time base, driven by the FreeRTOS tick.
+ *
+ * There is deliberately no SysTick_Handler() in the application: the patched
+ * port in lib/freertos_port_patch/src/port.c owns the SysTick vector, because
+ * it has to gate the tick interrupt inside critical sections.  The port calls
+ * the application tick hook whenever the HAL time base needs advancing -- both
+ * before the scheduler starts and on every subsequent tick -- so HAL_GetTick()
+ * and HAL_Delay() keep working exactly as before. */
+void vApplicationTickHook(void) {
     HAL_IncTick();
-    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-        xPortSysTickHandler();
-    }
 }
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {

@@ -3,7 +3,8 @@
 
 static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
-    return HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, HAL_MAX_DELAY);
+    return HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2,
+                                   OLED_I2C_TIMEOUT_MS);
 }
 
 HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
@@ -44,13 +45,19 @@ void OLED_Clear(OLED_t *oled) {
 }
 
 HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
-    /* Set column and page address window to full screen */
+    /* Set column and page address window to full screen.  Bail out on the
+       first failure so a dead panel costs one timeout, not six. */
     HAL_StatusTypeDef status = OLED_SendCommand(oled, 0x21);
     status = (OLED_SendCommand(oled, 0) != HAL_OK) ? HAL_ERROR : status;
     status = (OLED_SendCommand(oled, OLED_WIDTH - 1) != HAL_OK) ? HAL_ERROR : status;
     status = (OLED_SendCommand(oled, 0x22) != HAL_OK) ? HAL_ERROR : status;
     status = (OLED_SendCommand(oled, 0) != HAL_OK) ? HAL_ERROR : status;
     status = (OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1) != HAL_OK) ? HAL_ERROR : status;
+
+    if (status != HAL_OK) {
+        oled->last_status = status;
+        return status;
+    }
 
     /* Send entire frame buffer in ONE I2C transaction:
      * [0x40][pixel0][pixel1]...[pixel1023]
@@ -62,7 +69,7 @@ HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
         tx_buf[1 + i] = oled->buffer[i];
     }
     if (HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
-                                tx_buf, sizeof(tx_buf), HAL_MAX_DELAY) != HAL_OK) {
+                                tx_buf, sizeof(tx_buf), OLED_I2C_TIMEOUT_MS) != HAL_OK) {
         status = HAL_ERROR;
     }
 
