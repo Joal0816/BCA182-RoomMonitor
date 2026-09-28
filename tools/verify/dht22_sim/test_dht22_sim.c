@@ -203,6 +203,36 @@ void test_read_decodes_before_system_clock_is_known(void) {
     TEST_ASSERT_EQUAL(24.0f, DHT22_GetTemperature(&dht));
 }
 
+/* A response pulse that measures short must not turn a frame into a mid-flight
+ * timeout.  The measurement clamps up to the floor, so every bit reads as "1"
+ * and the checksum rejects the frame -- but the wait bound keeps the nominal
+ * scale rather than following the measurement down.  Before it did, the clamped
+ * 8 cycles/us left a 22 us per-bit budget at 72 MHz, shorter than the 50 us
+ * bit-low pulse, and the read timed out instead of reporting a bad frame. */
+void test_short_response_pulse_does_not_time_out(void) {
+    uint8_t d[5];
+    make_frame(d, 650U, 0, 240U);
+    sim_load_bytes(d);
+    sim_set_response_high_us(8U); /* the driver times this: 8 us reads as 7 */
+
+    TEST_ASSERT_EQUAL(DHT22_ERROR, DHT22_Read(&dht));
+}
+
+/* The stretched direction: the measurement clamps to the ceiling, which biases
+ * the decode towards "0".  An all-zero frame is self-consistent under a plain
+ * 8-bit sum, so this is the one garbage frame that validates; the point of the
+ * test is that it is read at all rather than abandoned by a wait that expired
+ * mid-frame. */
+void test_stretched_response_pulse_does_not_time_out(void) {
+    uint8_t d[5];
+    make_frame(d, 650U, 0, 240U);
+    sim_load_bytes(d);
+    sim_set_response_high_us(800U); /* ten times the protocol's 80 us */
+
+    TEST_ASSERT_EQUAL(DHT22_OK, DHT22_Read(&dht));
+    TEST_ASSERT_EQUAL(0.0f, DHT22_GetTemperature(&dht));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_read_decodes_temperature_and_humidity);
@@ -221,5 +251,7 @@ int main(void) {
     RUN_TEST(test_read_recovers_after_timeout);
     RUN_TEST(test_read_decodes_when_counter_rate_disagrees_with_system_clock);
     RUN_TEST(test_read_decodes_before_system_clock_is_known);
+    RUN_TEST(test_short_response_pulse_does_not_time_out);
+    RUN_TEST(test_stretched_response_pulse_does_not_time_out);
     return UNITY_END();
 }

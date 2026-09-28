@@ -45,6 +45,10 @@ void sim_set_width(int index, uint16_t high_us);
  * real clock the firmware has mis-identified. */
 void sim_set_counter_cycles_per_us(uint32_t cycles_per_us);
 
+/* Change the width of the sensor's response high pulse, the one the driver times
+ * to learn its scale, so a test can drive the driver's plausibility clamp. */
+void sim_set_response_high_us(uint16_t us);
+
 /* Hooks referenced by the injected DWT macro and the simulated RTOS. */
 void dht22_sim_tick(void);
 DWT_Type *dht22_sim_dwt(void);

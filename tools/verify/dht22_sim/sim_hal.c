@@ -25,6 +25,10 @@ static uint32_t g_counter_cycles_per_us = 72U;
 #define DHT22_SIM_RESPONSE_HIGH_US 80U
 #define DHT22_SIM_BIT_LOW_US       50U
 
+/* The response high pulse is the one the driver times to learn its scale, so a
+ * test can stretch or shorten it to drive the driver's plausibility clamp. */
+static uint16_t g_response_high_us = DHT22_SIM_RESPONSE_HIGH_US;
+
 static uint8_t dht22_sim_level(uint32_t t) {
     if (g_mode == DHT22_SIM_NONE) {
         return 1U;
@@ -38,10 +42,10 @@ static uint8_t dht22_sim_level(uint32_t t) {
     }
     t -= DHT22_SIM_RESPONSE_LOW_US;
 
-    if (t < DHT22_SIM_RESPONSE_HIGH_US) {
+    if (t < g_response_high_us) {
         return 1U;
     }
-    t -= DHT22_SIM_RESPONSE_HIGH_US;
+    t -= g_response_high_us;
 
     if (g_mode == DHT22_SIM_TRUNCATED) {
         return 1U;
@@ -97,6 +101,7 @@ void sim_reset(uint16_t pin) {
     g_us = 0U;
     g_mode = DHT22_SIM_FRAME;
     g_counter_cycles_per_us = SystemCoreClock / 1000000U;
+    g_response_high_us = DHT22_SIM_RESPONSE_HIGH_US;
     g_dwt.CTRL = 0U;
     g_dwt.CYCCNT = 0U;
 
@@ -130,4 +135,8 @@ void sim_load_bytes(const uint8_t data[5]) {
 
 void sim_set_counter_cycles_per_us(uint32_t cycles_per_us) {
     g_counter_cycles_per_us = cycles_per_us;
+}
+
+void sim_set_response_high_us(uint16_t us) {
+    g_response_high_us = us;
 }
