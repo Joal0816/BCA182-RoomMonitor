@@ -10,6 +10,39 @@ A real-time environmental monitoring system built on the **STM32 Blue Pill** usi
 
 ---
 
+## Submission Artifacts
+
+| Artifact | Link |
+|---|---|
+| **Laboratory Report (PDF)** | [docs/laboratory-report.pdf](docs/laboratory-report.pdf) |
+| Laboratory Report (Markdown source) | [docs/laboratory-report.md](docs/laboratory-report.md) |
+| Hackster.io write-up | [Real-Time Multisensor Room Monitoring System with FreeRTOS](https://www.hackster.io/554910/real-time-multisensor-room-monitoring-system-with-freertos-450a00) |
+| Verification harness | [`tools/verify/run_all.sh`](tools/verify/run_all.sh) |
+| Full source | [`src/`](src/), [`lib/`](lib/), [`test/`](test/) |
+
+### Verification status
+
+`bash tools/verify/run_all.sh` runs seven passes. Six execute on this machine and all pass:
+
+| Pass | Result |
+|---|---|
+| Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.3%) | **PASS** |
+| 33 native unit tests | **PASS** |
+| Static analysis, counts unchanged | **PASS** |
+| Application-only size breakdown | **PASS** |
+| `platformio.ini` consistent with `lib/` | **PASS** |
+| Report PDF matches its Markdown | **PASS** |
+| Wokwi diagram lint | *skipped* — needs `wokwi-cli` |
+
+**One caveat is documented deliberately and should be read before grading:** the firmware
+builds and all tests pass, but a Wokwi simulation run against this revision stops after the
+three boot lines and never reaches a running task. All Wokwi behaviour in the report is
+therefore recorded as a development-time observation rather than a reproduced result. See
+**[L-07 in docs/limitations.md](docs/limitations.md)** for exactly what the replay established
+and what it did not.
+
+---
+
 ## Features
 
 - **Multi-sensor monitoring**: DHT22 (temperature/humidity), LDR (light), PIR (motion)
