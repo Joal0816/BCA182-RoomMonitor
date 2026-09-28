@@ -221,7 +221,11 @@ consumer never stalls SensorTask: it simply misses intermediate samples and alwa
 freshest one. `display_page_queue` is likewise depth 1 and overwritten, so rapid encoder turns
 collapse to the final page rather than queuing stale transitions.
 
-### 3.4 Task States Observed
+### 3.4 Task States
+
+The following states are the ones each task occupies, derived from the source and verifiable
+by inspection. They were **not** observed at runtime: no Wokwi session against the current
+revision reaches a task (see section 5.2 and L-07).
 
 - **Running**: SensorTask while executing `DHT22_Read()` or `LDR_Read()`
 - **Blocked**: SensorTask between sensor reads (inside `vTaskDelayUntil()` for 1 s), and
@@ -329,6 +333,9 @@ unmodified.
 | `test_state_machine` | 8 | State transitions: ACTIVE on motion, INACTIVE after timeout, return to ACTIVE on re-motion, timeout reset on motion | **PASSED** |
 | **Total** | **33** | | **ALL PASSED** |
 
+These 33 tests are the strongest verification evidence the project has, because they are the
+only automated checks that were **re-executed against the current revision**. They pass.
+
 Tests are hardware-independent: each suite transcribes the decision logic inline (with
 matching thresholds and page-count constants) rather than linking against the production
 `.c` files, so they build on a host PC with no STM32 headers and no target hardware. This
@@ -339,11 +346,11 @@ checked against `src/main.h` during this audit and currently agree.
 
 ### 5.2 Functional Verification
 
-All 10 functional tests were performed in Wokwi simulation. The results below are
-reproduced as recorded during development; the Wokwi simulation toolchain is not
-available in the environment used to audit this document, so the runs could not be
-replayed and each row should be read as a development-time observation rather than a
-re-measured result.
+All 10 functional tests were originally performed in Wokwi simulation. The results below
+are reproduced as recorded during development. **They were later re-executed against the
+current revision and none reproduced** — see the *Replay outcome* note below the table.
+Each row should therefore be read as a development-time observation, not as a re-measured
+result.
 
 > **Test-ID note:** these Wokwi stimulus checks are labelled **WF-01…WF-10** to avoid
 > colliding with the canonical procedure set **FT-01…FT-10** in
@@ -363,15 +370,22 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 > supplies an integer-only `printf`, so `%.1f` emitted the literal conversion text rather
 > than a number until `-Wl,-u,_printf_float` was added to the build flags. Any run that
 > predates that flag could not have displayed those values as written here. More broadly,
-> no row in this table could have produced a visible result until the port patch in
-> Challenge 4 allowed the scheduler to start at all, and the two rows involving the OLED
-> additionally required the OLED wire to survive — which it did not while long-form pin
-> labels were in use (L-09 in section 7.2). The table is retained as the development
-> record because the expected outcomes are verifiable against the source and remain the
-> correct pass criteria, but the `Actual Result` column should be read as the developer's
-> recorded observation, not as a result reproduced under the current revision.
+> the two rows involving the OLED additionally required the OLED wire to survive, which it
+> did not while long-form pin labels were in use (L-09 in section 7.2). The table is
+> retained as the development record because the expected outcomes are verifiable against
+> the source and remain the correct pass criteria, but the `Actual Result` column should be
+> read as the developer's recorded observation, not as a result reproduced under the
+> current revision.
+>
+> **Replay outcome.** The runs were subsequently re-executed against the current revision
+> with the Wokwi toolchain available and authenticated. **None of them reproduced.** Every
+> session emits three boot lines and then stops, with no task started and therefore no
+> peripheral interaction at all. The `Status` column below therefore records the original
+> development-time observations and is *not* a current result. See L-07 in
+> `docs/limitations.md` for the full replay outcome and for exactly what it does and does
+> not establish.
 
-| Test ID | Stimulus | Expected Result | Actual Result | Status |
+| Test ID | Stimulus | Expected Result | Actual Result (development-time) | Development status |
 |---------|---------|----------------|--------------|--------|
 | WF-01 | Set DHT22 temperature to 28.5 °C in Wokwi | Temperature page shows `28.5 C` and `Status: NORMAL` | Page 0 showed `28.5 C`; serial logged `[SENSOR] T=28.5C H=.. L=.. M=..` | **PASS** |
 | WF-02 | Set DHT22 humidity to 61.2 % | Humidity page shows `61.2 %` above a proportional bar | Page 1 showed `61.2 %` with the bar filled to ~61 % | **PASS** |
@@ -388,10 +402,12 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 
 > **Evidence scope.** The three experiments below were written as design validations: a
 > single fault is injected, the predicted effect reasoned through, and the fault restored.
-> Like the WF table above, their `Observed result` paragraphs were recorded during
+> Like the WF table above, their `Predicted result` paragraphs were derived during
 > development and could not have been observed on a board whose scheduler never started
-> (Challenge 4, section 7.3) — the Wokwi toolchain was also unavailable in the environment
-> that produced this revision, so they could not be replayed. What *is* independently
+> (Challenge 4, section 7.3) — and the fault runs were subsequently replayed against the
+> current
+> revision with the Wokwi toolchain, where the runs did **not** reproduce: the session
+> stops after the three boot lines and no task was observed running. What *is* independently
 > checkable is the mechanism: each root-cause paragraph follows from the FreeRTOS
 > scheduling rules and the task priorities and periods in `src/main.h`, and each was
 > checked line by line against the source during this audit. They are presented as
@@ -401,7 +417,7 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 
 `vTaskDelayUntil()` was removed, causing SensorTask to loop continuously.
 
-*Observed result:* DisplayTask froze on its last rendered frame, because it runs at the lowest priority (1) and no longer received CPU time. InputTask and MotionTask were **unaffected** — both run at priority 3, above SensorTask, so they still preempted it and remained responsive. AlarmTask also kept running: it shares priority 2 with SensorTask, and `configUSE_TIME_SLICING` is 1, so the two round-robin on every tick. SensorTask additionally began reporting continuous DHT22 read errors, since the loop issued a new single-wire transaction every few milliseconds while the DHT22 requires at least 2 s between samples.
+*Predicted result:* DisplayTask froze on its last rendered frame, because it runs at the lowest priority (1) and no longer received CPU time. InputTask and MotionTask were **unaffected** — both run at priority 3, above SensorTask, so they still preempted it and remained responsive. AlarmTask also kept running: it shares priority 2 with SensorTask, and `configUSE_TIME_SLICING` is 1, so the two round-robin on every tick. SensorTask additionally began reporting continuous DHT22 read errors, since the loop issued a new single-wire transaction every few milliseconds while the DHT22 requires at least 2 s between samples.
 
 *Root cause:* The FreeRTOS preemptive scheduler dispatches the highest-priority ready task. SensorTask (priority 2) never blocked, so it removed all CPU time from the only task below it — DisplayTask (priority 1). Tasks at higher priority are unaffected by construction: priorities 3 and 4 always preempt a priority-2 task. Time slicing keeps equal-priority peers running. So the failure is **priority-relative starvation, not a system-wide hang**. This is CPU starvation, not a deadlock.
 
@@ -411,7 +427,7 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 
 DisplayTask priority was raised from 1 to 4, above SensorTask and AlarmTask (both priority 2). Priority 4 is the highest value usable here, since `configMAX_PRIORITIES` is 5 and priority 0 is the idle task.
 
-*Observed result:* DisplayTask preempted SensorTask and AlarmTask (both priority 2). Because `OLED_Update()` pushes the full 1 KiB frame buffer in a single blocking `HAL_I2C_Master_Transmit()` at 100 kHz — roughly 92 ms of bus time — and `DISPLAY_REFRESH_MS` is 100 ms, DisplayTask held the CPU for most of every refresh period. SensorTask and AlarmTask were left with only a few milliseconds per cycle. Alarm evaluation latency rose accordingly, and temperature updates on screen grew visibly stale.
+*Predicted result:* DisplayTask preempted SensorTask and AlarmTask (both priority 2). Because `OLED_Update()` pushes the full 1 KiB frame buffer in a single blocking `HAL_I2C_Master_Transmit()` at 100 kHz — roughly 92 ms of bus time — and `DISPLAY_REFRESH_MS` is 100 ms, DisplayTask held the CPU for most of every refresh period. SensorTask and AlarmTask were left with only a few milliseconds per cycle. Alarm evaluation latency rose accordingly, and temperature updates on screen grew visibly stale.
 
 *Root cause:* Safety-critical tasks (sensor acquisition, alarm evaluation) must run at higher or equal priority to non-critical tasks (display rendering). Elevating DisplayTask inverted that ordering, so a long blocking I2C transfer repeatedly displaced the tasks that produce and act on the data. Note this is a **priority-assignment error, not classical priority inversion** — DisplayTask holds no resource that SensorTask is waiting on.
 
@@ -421,7 +437,7 @@ DisplayTask priority was raised from 1 to 4, above SensorTask and AlarmTask (bot
 
 The take/give pair inside `UART_Mutex_Printf()` was removed, so each task transmitted directly to `huart1` with no mutual exclusion.
 
-*Observed result:* Serial output became garbled with interleaved characters from multiple tasks mid-line, e.g., `[SensorT[AlarmTask] Temp: 25.2ak] Temp: 25.2 C`. No functional failure — sensor readings and alarm evaluation continued correctly.
+*Predicted result:* Serial output became garbled with interleaved characters from multiple tasks mid-line, e.g., `[SensorT[AlarmTask] Temp: 25.2ak] Temp: 25.2 C`. No functional failure — sensor readings and alarm evaluation continued correctly.
 
 *Root cause:* The shared resource is the **USART1 transmit stream**. `HAL_UART_Transmit()` writes the buffer byte-by-byte against the transmit-empty flag and is not reentrant; with no mutual exclusion, two tasks inside it at once interleave their bytes. Note that formatting is not the problem: each call formats into its own task-local `char buffer[256]` via `vsnprintf`, so no format state is shared.
 
@@ -539,7 +555,7 @@ The following limitations remain in the current implementation:
 | L-04 | Fixed compile-time priority scheme | Priorities are compile-time constants. Runtime priority adjustment is possible with `vTaskPrioritySet()` but not implemented. | Accepted. The priority scheme is validated through fault experiments and justified by design. |
 | L-05 | Wokwi UART output unavailable | No serial output appeared at all in the simulation terminal. The cause was wiring, not firmware: `A9`/`A10` must be connected to `$serialMonitor` using short header labels. | Fixed. `diagram.json` wires `["mcu:A9", "$serialMonitor:RX", …]` with short labels only. The underlying defect class — Wokwi discarding a wire it does not recognise — is recorded separately as L-09. |
 | L-06 | OLED rendering stalled behind per-byte I2C transfers | The original driver issued 1,024 separate transactions per frame, each with its own START/STOP and control byte. | Improved, but not the fix that made the display work. `OLED_Update()` now sends the full 1,025-byte frame in one transaction. The misattribution of the blank display to this change is corrected in Challenge 2 (section 7.3). |
-| L-07 | Wokwi's `cpsie` sets the interrupt masks instead of clearing them | The stock FreeRTOS Cortex-M3 port masks its own `svc 0` and never starts the first task, so the board appears completely dead after the pre-scheduler prints. This is the actual cause of the blank OLED and the absent task output. | Worked around in `lib/freertos_port_patch/src/port.c` by clearing `PRIMASK` and `FAULTMASK` with `msr` before the `svc`. The added instructions are redundant no-ops on real hardware. See Challenge 4 in section 7.3. |
+| L-07 | Wokwi's `cpsie` is believed to set the interrupt masks instead of clearing them | The stock FreeRTOS Cortex-M3 port would mask its own `svc 0` and never start the first task, so the board appears dead after the pre-scheduler prints. This is the leading hypothesis for the blank OLED and the absent task output, but it has **not** been confirmed by direct observation, and the workaround does **not** produce a visibly running system in Wokwi. | Worked around in `lib/freertos_port_patch/src/port.c` by clearing `PRIMASK` and `FAULTMASK` with `msr` before the `svc`. The added instructions are redundant no-ops on real hardware. See Challenge 4 in section 7.3 and L-07 in `docs/limitations.md`. |
 | L-08 | Wokwi does not implement `BASEPRI` | The V11 port implements `portDISABLE_INTERRUPTS()`/`portENABLE_INTERRUPTS()` by writing `BASEPRI`, so critical sections are not genuinely protected in the simulator. A concurrency defect that depends on a critical section would not be caught by a Wokwi run. | Accepted as a simulator limitation. `BASEPRI` works as specified on real hardware, so the firmware is correct on the target; the consequence is only that Wokwi cannot validate critical-section behaviour. |
 | L-09 | Wokwi silently discards unrecognised pin labels | A wire written with a long-form pin name such as `mcu:PA9` is dropped without any error, so a mislabelled net is indistinguishable from an unconnected one. This produced a false "OLED renders correctly" conclusion that survived several revisions of this report. | Mitigated. All labels in `diagram.json` use the short header form, and the convention is recorded here so it is not reintroduced. There is no way to make Wokwi report the error, so the mitigation is procedural. |
 | L-10 | OLED driver discarded every I2C status | `OLED_SendCommand()`, `OLED_SendData()` and `OLED_Update()` called `HAL_I2C_Master_Transmit()` and discarded the result, so the firmware could not distinguish a panel that acknowledged its address from one that was absent or mis-addressed. A wiring fault therefore presented as a software fault. | Fixed. `OLED_Init()` and `OLED_Update()` now return `HAL_StatusTypeDef` and latch the first failure; `OLED_Init()` stops at the first unacknowledged command. `main.c` and `DisplayTask()` report the failure over UART. Transient failures are reported but not retried. |
@@ -549,7 +565,7 @@ The following limitations remain in the current implementation:
 - **UART output — wiring.** The serial terminal remained silent because the firmware never reached its first `printf`. `PA9 (TX)` is connected to `$serialMonitor` in `diagram.json`, and the connections use the Blue Pill's short header labels (`A9`, `A10`, `3V3.1`, `5V.1`); Wokwi silently drops wires written with long-form names such as `mcu:PA9` or `mcu:3.3V`. This is a real and reproducible defect class: Wokwi does not raise an error for an unrecognised pin name, it discards the wire, so a mislabelled net is indistinguishable from an unconnected one. Commit `3491fe7` corrected every label in `diagram.json` for this reason.
 - **OLED display — driver.** The original driver sent 1,024 individual I2C transactions (one per pixel byte), each with its own START/STOP and control byte. The fix sends the entire 1,025-byte frame buffer in one I2C transaction, matching the SSD1306 data-streaming protocol. This is a genuine improvement in both bus efficiency and simulator load, and it is verifiable by inspection of `src/app/hal/oled.c`.
 - **Boot-blocking sensor initialisation.** `DHT22_Init()` contained a 2-second blocking delay, and because `main()` calls it before `vTaskStartScheduler()`, that delay postponed every later initialisation — including the first serial message and the start of `DisplayTask`. The driver no longer waits; the settling time is absorbed by `SensorTask` as a `vTaskDelay()`, so it costs nothing on the boot path. The same driver also had two timing defects that made every read fail once the boot block was removed: the cycle counter was trusted on the strength of its own enable bit, and the bit decoder depended entirely on that counter. See Challenge 3 in section 7.3.
-- **Scheduler never started — the port defect.** This is the one that actually explains the blank OLED and the absent task output, and it is described in full in Challenge 4 (section 7.3). It is a deviation in Wokwi's Cortex-M3 model, not a defect in this project's application code.
+- **Scheduler never started — the port defect (leading hypothesis).** This is the leading explanation for the blank OLED and the absent task output, and it is described in full in Challenge 4 (section 7.3). It is believed to be a deviation in Wokwi's Cortex-M3 model rather than a defect in this project's application code. **Two caveats must travel with this claim.** First, the mechanism has not been observed directly — it rests on reasoning and object-code inspection, because the Wokwi GDB stub does not support the watchpoints that would be needed to inspect `PRIMASK` at the point of failure. Second, the workaround, although confirmed present in the linked image and confirmed to leave the vector table correct at runtime, does **not** yield a visibly running system: a replay against the current revision still stops after the three boot lines. See L-07 in `docs/limitations.md` for the full replay result.
 
 **A note on the strength of the evidence.** The first three items above are supported by source inspection and by the commit history. The fourth is supported by disassembly of the linked image plus the documented behaviour of the simulator, and it is the only hypothesis that accounts for the *complete* symptom set — two `[MAIN]` lines appearing and nothing else. It is stated here as the best-supported explanation rather than as a directly observed one, because the simulator's internal register state cannot be inspected from outside. Section 7.5 describes the instrumentation that was added to make this class of failure observable rather than silent.
 
@@ -587,7 +603,7 @@ This was the defect that actually produced the reported symptom, and it was the 
 - **Interrupt priority assertions.** The ISRs that call `...FromISR` are EXTI2/EXTI4 at HAL priority 5 and EXTI0 at priority 6, both at or below the `configMAX_SYSCALL_INTERRUPT_PRIORITY` ceiling of raw `0x50`, and the port's own AIRCR priority-group check passes because the STM32F103 implements 4 priority bits. An earlier hypothesis that a SysTick priority assertion was trapping the boot was investigated and **refuted**: `xPortStartScheduler()` explicitly ORs `0xFF` over the SysTick priority byte to force it to the lowest priority, so the value it asserts on is the one it just wrote.
 - **Vector table relocation.** The framework's `SystemInit()` is compiled down to a bare `bx lr` — disassembly of `FrameworkCMSISDevice/system_stm32f1xx.o` shows the entire function body is the two bytes `4770` — so nothing in the stock boot path ever programs `VTOR`, which keeps its reset value of 0. A scan of the linked image finds the `0xE000ED08` literal in exactly two places, both of them loads inside the FreeRTOS port, and no store to it anywhere. This is a real latent defect, because FreeRTOS V11 defaults `configCHECK_HANDLER_INSTALLATION` to 1 and the check it performs reads the vector table *through* `VTOR` to confirm that vectors 11 and 14 are the port's own SVC and PendSV handlers. On a Blue Pill with BOOT0 tied low, address 0 aliases flash, so the check passes by luck; where that alias is absent the core would fetch the table from unmapped memory. It is fixed by the explicit relocation described in section 7.5, but it is **not** the cause of the observed symptom, because the alias is present in the simulator.
 
-*Root cause.* The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` ends with a sequence that clears the interrupt masks and then issues the supervisor call that starts the first task:
+*Leading hypothesis.* The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` ends with a sequence that clears the interrupt masks and then issues the supervisor call that starts the first task:
 
 ```asm
 cpsie i          ; clear PRIMASK  -- enable interrupts
@@ -597,9 +613,18 @@ isb
 svc 0            ; start the first task
 ```
 
-On real ARMv7-M hardware, `cpsie i` clears `PRIMASK` and `cpsie f` clears `FAULTMASK`. Wokwi's Cortex-M3 model implements these instructions with the opposite effect: they **set** the masks instead of clearing them. The consequence is that `PRIMASK` is left at 1 when the `svc 0` executes, and `SVCall` is a configurable-priority exception, which means it is masked by `PRIMASK`. The supervisor call never fires. The first task is never entered, the scheduler never dispatches anything, and the system sits in the idle loop of `xPortStartScheduler()` forever — with interrupts masked, so no tick, no context switch, and no output.
+On real ARMv7-M hardware, `cpsie i` clears `PRIMASK` and `cpsie f` clears `FAULTMASK`. Wokwi's Cortex-M3 model is believed to implement these instructions with the opposite effect: they **set** the masks instead of clearing them. The consequence would be that `PRIMASK` is left at 1 when the `svc 0` executes, and `SVCall` is a configurable-priority exception, so it is masked by `PRIMASK`. The supervisor call would never fire, the first task would never be entered, and the system would sit in the idle loop of `xPortStartScheduler()` forever — with interrupts masked, so no tick, no context switch, and no output.
 
-This accounts for the symptom set exactly, including the detail that made it confusing: the two `[MAIN]` lines appear because they are emitted before the scheduler starts, and everything after that point is silent because nothing after that point ever runs.
+> **Evidence status.** The mechanism above is the **leading hypothesis**, not a confirmed
+> cause. It is supported by reasoning and by object-code inspection, but the faulting
+> instruction was never observed directly: hardware watchpoints are unsupported by the
+> Wokwi GDB stub and the 1 kHz SysTick starves an attached session, so a debugger could not
+> be used to inspect `PRIMASK` at the point of failure. Read the sections below with that
+> in mind — in particular, *Replay against the current revision*.
+
+The hypothesis accounts for the symptom set, including the detail that made it confusing: the three boot lines appear because they are emitted before the scheduler starts, and everything after that point is silent because nothing after that point runs. Note the limit of that reasoning, however: all three emitted lines are written *before* `vTaskStartScheduler()`, whereas every `[TASK] <name> entered` banner is written from inside a task through the mutex-and-HAL logging path. A break *after* the scheduler starts but *before* that path becomes usable would produce the identical observable output. The boot log alone cannot distinguish the two.
+
+*Replay against the current revision.* The simulation was re-executed against the current build, repeatedly and reproducibly, with no debugger attached. It does **not** show a running system — the three boot lines appear and then the output stops, with no task banner, no OLED frame and no LED activity. What that establishes and what it does not is recorded in full under L-07 in `docs/limitations.md`; in summary, the patched port is confirmed present in the linked image and the vector table is confirmed correct at runtime (`vectors-ok`), every instrumented failure path is excluded by the absence of its log line, but **neither the task execution nor the `cpsie` mechanism was observed directly**. The patch is therefore necessary-but-unproven, and the workaround as it stands does not produce a visibly running system in Wokwi.
 
 *The fix.* The project carries a local copy of the port at `lib/freertos_port_patch/src/port.c`, which is the stock V11.3.1 ARM_CM3 port with three instructions added before the `svc`:
 
@@ -614,7 +639,7 @@ svc 0
 
 *Why the port is patched rather than the application.* The defect is in the simulator's instruction semantics, not in this project's code, so there is no application-level change that can address it. The alternative — adopting the reference implementation's entire custom port, which replaces the PendSV-based context switch with a SysTick-driven one and reimplements the critical-section primitives — was rejected because that port targets FreeRTOS V10.3.1 and would forfeit V11 behaviour including `configCHECK_HANDLER_INSTALLATION` and the V11 SVC/PendSV handler naming. Patching three instructions in the project's own V11 port keeps the kernel version, the configuration, and every other port behaviour unchanged.
 
-*Two further simulator deviations, documented but not worked around.* Wokwi's Cortex-M3 model also does not implement `BASEPRI`, and its `PRIMASK`/`FAULTMASK` do not block SysTick. The first of these means that `portDISABLE_INTERRUPTS()` and `portENABLE_INTERRUPTS()` — which the V11 port implements by writing `BASEPRI` — have no effect in the simulator, so critical sections are not genuinely protected there. This does not affect the correctness of the firmware on real hardware, where `BASEPRI` works as specified, but it does mean that any concurrency defect that depends on a critical section would not be caught by a Wokwi run. It is recorded as limitation L-06 in section 7.2.
+*Two further simulator deviations, documented but not worked around.* Wokwi's Cortex-M3 model also does not implement `BASEPRI`, and its `PRIMASK`/`FAULTMASK` do not block SysTick. The first of these means that `portDISABLE_INTERRUPTS()` and `portENABLE_INTERRUPTS()` — which the V11 port implements by writing `BASEPRI` — have no effect in the simulator, so critical sections are not genuinely protected there. This does not affect the correctness of the firmware on real hardware, where `BASEPRI` works as specified, but it does mean that any concurrency defect that depends on a critical section would not be caught by a Wokwi run. It is recorded as limitation L-08 in section 7.2.
 
 ### 7.4 Alternative Approaches Considered
 
@@ -658,15 +683,21 @@ The instrumentation is deliberately dependency-free: `diag.c` includes only `<st
 
 ## 8. Conclusion
 
-The BCA182 Room Monitoring System successfully demonstrates a production-quality real-time embedded system using FreeRTOS on the STM32F103C8T6. The five-task architecture with explicit priority assignment, dual-queue sensor fan-out, event-group signaling, and mutex-protected UART implements all required FreeRTOS concepts with functional justification — no object was created solely to satisfy the checklist.
+The BCA182 Room Monitoring System implements a production-quality real-time embedded
+architecture using FreeRTOS on the STM32F103C8T6. The five-task architecture with explicit
+priority assignment, dual-queue sensor fan-out, event-group signaling, and mutex-protected
+UART implements all required FreeRTOS concepts with functional justification — no object
+was created solely to satisfy the checklist. The design and the hardware-independent logic
+are fully verified; the on-target runtime behaviour is the one item that is not, for the
+reason recorded in the last key outcome below.
 
 **Key outcomes:**
 - All 10 functional requirements (FR-01 through FR-10) are implemented
-- 33 automated unit tests pass on the native host PC (hardware-independent)
-- The 10 Wokwi functional checks (WF-01 through WF-10) are documented in section 5.2 as development-time observations; their expected outcomes were verified line by line against the source, but the runs themselves were not replayed during the audit that produced this revision
-- Static analysis found 0 functional defects across all passes; 21 LOW-severity clang-tidy advisories, 1 compiler warning, and 2 benign memory-mapped-register findings were reviewed and accepted
-- 3 fault experiments reasoned through against the scheduler rules and checked against the source (section 5.3); the observed-effect paragraphs are development-time notes, not measurements
-- The root cause of the blank-OLED / silent-terminal symptom was identified as a deviation in the simulator's Cortex-M3 instruction semantics, isolated to three instructions in the FreeRTOS port, and worked around without changing the kernel version or any application code (Challenge 4, section 7.3)
+- 33 automated unit tests pass on the native host PC (hardware-independent); these were re-run against the current revision and all pass
+- The 10 Wokwi functional checks (WF-01 through WF-10) are documented in section 5.2 as development-time observations. Their expected outcomes were verified line by line against the source, and the runs were subsequently replayed against the current revision with the Wokwi toolchain — where **none of them reproduced**: the session stops after the three boot lines and no task is started, so no peripheral interaction occurs. The WF table therefore records the original observations and is not a current result
+- Static analysis found 0 functional defects across all passes; 21 LOW-severity clang-tidy advisories, 1 compiler warning, and 2 benign memory-mapped-register findings were reviewed and accepted; all re-verified on the current revision
+- 3 fault experiments reasoned through against the scheduler rules and checked against the source (section 5.3); their `Predicted result` paragraphs are derived consequences of the configuration, not measurements
+- The blank-OLED / silent-terminal symptom was traced to a suspected deviation in the simulator's Cortex-M3 instruction semantics, isolated to three instructions in the FreeRTOS port, and worked around without changing the kernel version or any application code (Challenge 4, section 7.3). **Both halves of that finding are qualified:** the mechanism is a leading hypothesis rather than an observed cause, and the workaround does not produce a visibly running system — a replay against the current revision still stops after the boot lines. This is the principal open item in the project
 - The firmware was hardened so that a boot failure is no longer silent: a fault handler that decodes and reports the exception frame, a relocated vector table, captured task-creation return codes, and a visible fault LED (section 7.5)
 
 **Lessons learned:**

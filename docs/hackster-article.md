@@ -271,6 +271,14 @@ The 1-wire protocol requires sub-millisecond bus timing. Calling `HAL_Delay()` i
 ### 4. Wokwi's `cpsie` Masked the Scheduler's Own Supervisor Call
 After the boot-blocking defect above was fixed, the terminal still showed only two lines — `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — followed by nothing at all. Both are printed from `main()` *before* `vTaskStartScheduler()`, so the silence began exactly at the scheduler start. The OLED stayed blank and no task ever ran.
 
+> **Confidence note.** This section describes a mechanism that is **consistent with** the
+> observed symptom, not one that was observed directly. The comparison below is stated as
+> what it was: a leading hypothesis reached by reading the port's source and disassembly,
+> after every other candidate had been excluded. A replay against the current revision still
+> does not produce a running system even with the workaround applied, so the workaround is
+> unproven. See Challenge 4's evidence status in the full report and `docs/limitations.md`
+> L-07.
+
 The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` clears the interrupt masks and then issues the supervisor call that starts the first task:
 
 ```asm
@@ -281,7 +289,7 @@ isb
 svc 0            ; start the first task
 ```
 
-On real ARMv7-M hardware `cpsie` **clears** those masks. Wokwi's Cortex-M3 model implements it with the opposite effect: it **sets** them. `PRIMASK` was therefore left at 1 when the `svc 0` executed, and because `SVCall` is a configurable-priority exception it is masked by `PRIMASK`. The supervisor call never fired, the first task was never entered, and the system sat in the idle loop of `xPortStartScheduler()` forever with interrupts masked — no tick, no context switch, no output.
+On real ARMv7-M hardware `cpsie` **clears** those masks. The hypothesis is that Wokwi's Cortex-M3 model implements it with the opposite effect, **setting** them. `PRIMASK` would then be left at 1 when the `svc 0` executed, and because `SVCall` is a configurable-priority exception it is masked by `PRIMASK` — the supervisor call never fires, the first task is never entered, and the system sits in the idle loop of `xPortStartScheduler()` forever with interrupts masked: no tick, no context switch, no output.
 
 Everything above this layer had already been eliminated: the wiring resolved to real pins, the pre-scheduler UART output proved the HSE oscillator and 72 MHz PLL were locked, the heap had ~2 KB of headroom against a 12,288 B pool, and the ISR priorities were all legal. The fault was in the simulator's instruction semantics, so no application-level change could have fixed it.
 
@@ -324,7 +332,7 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 2. **Single Buzzer Alarm:** Currently only temperature out-of-range conditions sound the buzzer; humidity and motion alarms are visual-only.
 3. **No Persistent Storage:** Telemetry is stored purely in volatile RAM; power cycling clears historical data.
 4. **Fixed Task Priorities:** Task priorities are configured statically at compile time rather than dynamically adapted.
-5. **Simulator Fidelity:** Wokwi's Cortex-M3 model deviates from ARMv7-M in three ways that affect this project — `cpsie` sets the interrupt masks instead of clearing them, `BASEPRI` is not implemented, and a pin label it does not recognise is discarded without warning. The first two mean that interrupt handling and critical sections cannot be genuinely verified in simulation, and the third cost real debugging time. The firmware is written for correct hardware behaviour; the simulator deviations are worked around, not accommodated in the design.
+5. **Simulator Fidelity:** Wokwi's Cortex-M3 model is believed to deviate from ARMv7-M in three ways that affect this project — `cpsie` sets the interrupt masks instead of clearing them, `BASEPRI` is not implemented, and a pin label it does not recognise is discarded without warning. The first two mean that interrupt handling and critical sections cannot be genuinely verified in simulation, and the third cost real debugging time. The firmware is written for correct hardware behaviour; the simulator deviations are worked around, not accommodated in the design. A replay against the current revision still does not reach a running task even with the workaround in place, so the on-target behaviour remains to be confirmed on real hardware.
 6. **Float Formatting:** The `newlib-nano` default links an integer-only `printf`, so `%.1f` silently emitted literal conversion text rather than a number. Fixed with `-Wl,-u,_printf_float`; the cost is a little under 3 KB of flash.
 7. **I2C Error Reporting (addressed):** The OLED driver originally discarded the status returned by every `HAL_I2C_Master_Transmit()` call, so the firmware could not distinguish "display acknowledged" from "display absent" — a missing or mis-addressed display presented as a blank screen rather than an error. `OLED_Init()` and `OLED_Update()` now return `HAL_StatusTypeDef`, latch the first failure, and the callers in `main.c` and `DisplayTask()` print `[OLED] init failed` / `[OLED] frame transfer failed` over UART. The remaining gap is that a *transient* failure is reported but not retried.
 

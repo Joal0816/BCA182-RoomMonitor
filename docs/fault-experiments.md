@@ -13,20 +13,23 @@ buzzer, encoder response). The fault is then reverted and the baseline re-confir
 derived mechanically from the scheduler configuration in `src/FreeRTOSConfig.h`, the
 task priorities in `src/main.c`, and the blocking structure of each task — that is,
 they are deterministic consequences of the configuration, not measurements. The
-*What Happened* sections describe the mechanism that the configuration forces. Where a
+*Predicted Behaviour* sections describe the mechanism that the configuration forces. Where a
 predicted outcome is a direct corollary of the configuration (for example, "a priority-3
 task cannot be starved by a priority-2 task"), it holds regardless of any particular run.
 
 > **Scope of the observations.** These experiments are analysed, not re-measured. The
-> *What Happened* sections state what the configuration implies, and they were reasoned
+> *Predicted Behaviour* sections state what the configuration implies, and they were reasoned
 > through against the scheduler rules and checked against the source; they are not
 > recordings from a logged session on the current revision. Any statement below about
 > what was *seen* — a display updating, a buzzer sounding, a value on screen — is a
-> development-time note and must not be read as a reproducible result. Two findings in
+> development-time note and must not be read as a reproducible result. A later replay
+> against the current revision did not reproduce any of them either: the session stops after
+> the three boot lines with no task running. Two findings in
 > particular bound what could ever have been observed: the decimal values in
-> Experiment 1 needed `-Wl,-u,_printf_float` (see L-06 in
-> [`limitations.md`](limitations.md)), and no run could produce any task output at all
-> before the FreeRTOS port patch (see L-07). See
+> Experiment 1 needed `-Wl,-u,_printf_float` (see report §7.1 in
+> [`laboratory-report.md`](laboratory-report.md)), and no run could produce any task output
+> at all once the scheduler failed to start (see L-07 in
+> [`limitations.md`](limitations.md)). See
 > [`functional-verification.md`](functional-verification.md) for the same distinction.
 
 Two settings govern every outcome below:
@@ -68,7 +71,7 @@ void SensorTask(void *argument) {
 }
 ```
 
-### What Happened
+### Predicted Behaviour
 
 1. **SensorTask monopolized the CPU.** SensorTask runs at priority 2, above DisplayTask (priority 1). Because it never yielded and never blocked, the scheduler could never dispatch the lower-priority DisplayTask.
 
@@ -122,7 +125,7 @@ xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
 xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 4, NULL);
 ```
 
-### What Happened
+### Predicted Behaviour
 
 1. **DisplayTask preempted SensorTask.** Because DisplayTask now runs at priority 4, it preempted both SensorTask and AlarmTask (both priority 2) every 100 ms whenever its delay expired.
 
@@ -190,7 +193,7 @@ void UART_Mutex_Printf(UART_Mutex_t *uart_mutex, const char *format, ...) {
 }
 ```
 
-### What Happened
+### Predicted Behaviour
 
 1. **Interleaved serial output.** The serial terminal displayed garbled, overlapping messages:
 

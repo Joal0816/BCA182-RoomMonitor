@@ -5,10 +5,12 @@
 **Test Environment:** Wokwi simulation with UART serial monitor
 
 > **Evidence basis.** These tests were executed during development against a Wokwi
-> simulation. Wokwi is not installed in the environment used to audit this document, so
-> the runs could not be replayed. Each *Actual Result* below is a development-time
-> observation; the *Expected Result* column has been checked line-by-line against the
-> source, and each is derivable from the code cited in the procedure.
+> simulation. They were later replayed against the current revision with the Wokwi
+> toolchain installed and authenticated, and **none of them reproduced**: every session
+> emits three boot lines and then stops, with no task started. Each *Actual Result* below
+> is therefore a development-time observation only; the *Expected Result* column has been
+> checked line-by-line against the source, and each is derivable from the code cited in the
+> procedure.
 >
 > **How to read the `Status` column.** `PASS` records the developer's verdict at the time
 > of the run. It is not a re-measured result, and for this revision it cannot be one: the
@@ -270,15 +272,15 @@ holds the UART mutex indefinitely (`xSemaphoreTake` uses a 100 ms timeout).
 | IDE | PlatformIO with arm-none-eabi-gcc | N/A |
 | Serial Monitor | 115200 baud, 8N1 | Full ($serialMonitor) |
 
-> **Wokwi Simulation Note:** UART serial monitoring is wired via `$serialMonitor` on PA9 and the SSD1306 OLED is wired on I2C1 (PB6/PB7). Both connections use the short header pin labels that Wokwi recognises; long-form labels such as `mcu:PA9` are silently discarded by the simulator, which is the defect recorded as L-05 in [docs/limitations.md](limitations.md). The simulator's Cortex-M3 model deviates from ARMv7-M in ways that affect the FreeRTOS port — most importantly, its `cpsie` instruction sets the interrupt masks instead of clearing them, which prevented the first task from ever starting until the port was patched. See Challenge 4 in section 7.3 of [docs/laboratory-report.md](laboratory-report.md). Complete logic is additionally verified via 33 automated native unit tests, which run on the host and are unaffected by simulator behaviour.
+> **Wokwi Simulation Note:** UART serial monitoring is wired via `$serialMonitor` on PA9 and the SSD1306 OLED is wired on I2C1 (PB6/PB7). Both connections use the short header pin labels that Wokwi recognises; long-form labels such as `mcu:PA9` are silently discarded by the simulator, which is the defect recorded as L-05 in [docs/limitations.md](limitations.md). The simulator's Cortex-M3 model is believed to deviate from ARMv7-M in ways that affect the FreeRTOS port — most importantly, its `cpsie` instruction may set the interrupt masks instead of clearing them. Even with the port patched, a replay against the current revision does **not** reach a running task. See Challenge 4 in section 7.3 of [docs/laboratory-report.md](laboratory-report.md) and L-07 in [docs/limitations.md](limitations.md). Complete logic is additionally verified via 33 automated native unit tests, which run on the host and are unaffected by simulator behaviour; those 33 tests are the only verification result re-executed against this revision.
 
 ---
 
 ## Conclusion
 
-The ten functional tests cover sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation. Their expected outcomes were verified against the source; the Wokwi runs themselves were recorded during development and were not replayed during the audit that produced this revision — see the Wokwi Simulation Note above and L-05 to L-09 in [docs/limitations.md](limitations.md).
+The ten functional tests cover sensor reading, display output, user input, alarm activation, state machine transitions, and concurrent task operation. Their expected outcomes were verified against the source; the Wokwi runs themselves were recorded during development and a later replay against the current revision did **not** reproduce any of them — see the Evidence basis note and the Wokwi Simulation Note above, and L-05 to L-09 in [docs/limitations.md](limitations.md). The table above should be read as a design specification with development-time observations attached, not as a current test result.
 
 **Verification methods:**
-- Wokwi simulation: full circuit simulation with OLED rendering and UART terminal monitoring (development-time observations; Wokwi's Cortex-M3 model deviates from ARMv7-M — see L-07/L-08)
+- Wokwi simulation: full circuit simulation with OLED rendering and UART terminal monitoring (development-time observations; a replay against the current revision stops after three boot lines — see L-07)
 - Native unit tests: 33 automated tests (re-run during this audit; all passing)
 - Hardware validation: Physical STM32 Blue Pill board compatible; not exercised during this work

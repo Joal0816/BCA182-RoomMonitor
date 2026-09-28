@@ -246,7 +246,9 @@ pio check
 
 The project is simulated in Wokwi with all peripherals wired, including USART1 serial output (via `$serialMonitor`) and the SSD1306 OLED display (via bulk I2C buffer transmission).
 
-> **Status:** the simulation was used throughout development to iterate on the firmware, but the most recent revision has **not** been replayed in the simulator. The wiring and the firmware are both verified by construction and by the local `tools/verify/` harness; the per-run observations quoted in [docs/functional-verification.md](docs/functional-verification.md) are development-time notes rather than a re-run of the current revision. See [docs/limitations.md](docs/limitations.md) for the outstanding items.
+> **Status:** the simulation was used throughout development to iterate on the firmware. It was later replayed against the current revision with `wokwi-cli` installed and authenticated, and **the replay did not show a running system** — every session emits three boot lines and then stops, with no task started. The per-run observations quoted in [docs/functional-verification.md](docs/functional-verification.md) are therefore development-time notes, not a re-run of the current revision. See [docs/limitations.md](docs/limitations.md) L-07 for exactly what the replay did and did not establish.
+>
+> What *is* re-runnable on the current revision without the simulator: the 7-pass local harness (`tools/verify/run_all.sh`), the 33 native unit tests, and the static analysis. All pass.
 
 The schematic below is generated directly from `diagram.json` and shows all 9 components and 25 connections as they are wired in the simulator.
 
@@ -294,10 +296,17 @@ If it instead prints `[port-patch] WARNING: ... was NOT compiled`, the Wokwi `cp
 |-------------|---------|
 | `[TASK] DisplayTask entered` and the OLED shows `Initializing...` within ~1 s | Working. The `svc` was not masked. |
 | `[TASK] SensorTask entered` and `[SENSOR] T=25.0C H=50.0% L=500 M=0` | Working, and the float formatter is linked. |
-| Only the two `[MAIN]` lines, then silence | The `svc` is still masked — the port workaround is not in the image. Recheck step 2. |
+| The `[DIAG] VTOR` line and the two `[MAIN]` lines, then silence | The boot path through `vTaskStartScheduler()` completes but no task is entered. This is the current observed state of the project and is not yet resolved — see L-07 in [docs/limitations.md](docs/limitations.md). It is **not** by itself proof that the port patch is missing; confirm step 2 first. |
+| `[MAIN] FATAL: xTaskCreate failed` or `ASSERT:`/`[FATAL]` output | A specific failure was detected and reported. The message names it. |
 | `[OLED] init failed: no ACK from 0x3C` | The panel is not acknowledging. A wiring or simulator fault, not a software one. |
 | `[SENSOR] T=0.0C H=0.0%` or garbage digits | The `%f` formatter is not linked; check `-Wl,-u,_printf_float` in `platformio.ini`. |
 | Serial monitor completely empty | The monitor tab is almost certainly closed. Recheck step 4. |
+
+> **Caution when interpreting a silent run.** Wokwi's CLI can also drop the transport
+> mid-session (`API Error: Connection to transport closed unexpectedly: code 1006`) and the
+> serial log file is truncated at a fixed size if the client is killed, which can leave a
+> partial trailing token that looks like real output. Treat any observation taken from a
+> killed or error-terminated session as inconclusive and re-run it.
 
 The onboard LED should stay **off** throughout. It is wired active-low and PC13 is driven HIGH at boot, so a lit LED at rest indicates a wiring error rather than normal operation.
 

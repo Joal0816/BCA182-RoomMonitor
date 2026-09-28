@@ -10,17 +10,25 @@ the three reproducible results quoted in the laboratory report:
 | Firmware size / RAM use | report §7.1 | **Approximately** — `run_size_analysis.sh` |
 | `platformio.ini` is consistent with `lib/` | — | **Yes** — `check_config.py` |
 | `diagram.json` is a valid Wokwi circuit | — | **Yes** — `wokwi-cli lint` (skipped if `wokwi-cli` is absent) |
+| `docs/laboratory-report.pdf` matches the Markdown | — | **Yes** — `generate_report_pdf.py --check` (skipped if WeasyPrint is absent) |
 
 The first four scripts are self-contained: they need only `gcc`, `clang`,
 `clang-tidy` and Python 3, and they never touch the network or the real
 STM32Cube/FreeRTOS packages.
 
-The Wokwi diagram lint is the one pass with an external dependency. `wokwi-cli`
-is a single static binary (https://github.com/wokwi/wokwi-cli/releases), and
-`run_all.sh` reports the pass as *skipped* rather than failed when it is not on
-`PATH`, so the harness still passes on a machine that does not have it. Note
-that `lint --offline` needs no CI token; only `wokwi-cli test`, which actually
-executes the firmware, does.
+Two passes have external dependencies. The Wokwi diagram lint needs `wokwi-cli`
+(`https://github.com/wokwi/wokwi-cli/releases`), and the PDF freshness check
+needs `weasyprint` and `markdown` (`pip install weasyprint markdown`) plus
+`pdftotext`. `run_all.sh` reports either pass as *skipped* rather than failed
+when the dependency is not present, so the harness still passes on a machine
+that has neither. Note that `lint --offline` needs no CI token; only
+`wokwi-cli test`, which actually executes the firmware, does.
+
+The PDF check re-renders the report Markdown into a temporary file and compares
+the extracted text against the committed PDF, so a Markdown edit that was not
+followed by `python3 tools/generate_report_pdf.py` fails loudly. The comparison
+is on text rather than bytes because PDF streams are not reproducible run to
+run. Always commit the Markdown and the PDF together.
 
 One further script is **not** part of `run_all.sh`, because it cannot run in an
 environment without PlatformIO:
@@ -106,6 +114,9 @@ an unnoticed new finding impossible to merge.
 
 ## What is *not* covered here
 
-The Wokwi simulation runs (`docs/functional-verification.md`) and the fault
-experiments (`docs/fault-experiments.md`) cannot be replayed by these scripts.
-See the "Evidence limits" section of `docs/limitations.md`.
+The Wokwi behavioural runs (`docs/functional-verification.md`, the WF table in the
+laboratory report, and the fault experiments) cannot be replayed by these scripts. A replay
+against the current revision was performed with `wokwi-cli` installed and authenticated and
+did **not** reproduce any of them — every session stops after three boot lines with no task
+started. See L-07 in `docs/limitations.md` for the outcome and the "Evidence limits" section
+of the same file for what the harness does and does not establish.
