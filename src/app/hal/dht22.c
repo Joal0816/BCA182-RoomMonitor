@@ -268,7 +268,8 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        where the response pulse measured short and the firmware also under-states
        the clock: there no evidence available here yields a rate above the real
        one, so a bad frame is then reported as a timeout rather than as
-       DHT22_ERROR. */
+       DHT22_ERROR.  A measurement clamped at the cap is a second such path, for a
+       counter faster than the cap; see DHT22_MAX_CYCLES_PER_US. */
     uint32_t cycles_per_us = nominal_scale;
     uint32_t bound_scale = nominal_scale;
     uint32_t wait_budget = DHT22_EDGE_US * bound_scale;
@@ -318,7 +319,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
 
     /* The reply has supplied a measured rate and bound_scale is the higher of it
        and the firmware's belief, so this is DHT22_BIT_EDGE_US real microseconds
-       unless the firmware over-estimated the clock. */
+       whenever either input is at least the real rate -- the corner noted above
+       and a measurement clamped at the cap being the exceptions -- and generously
+       longer when the firmware over-estimates the clock. */
     wait_budget = DHT22_BIT_EDGE_US * bound_scale;
 
     for (int i = 0; i < 40; i++) {
