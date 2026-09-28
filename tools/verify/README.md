@@ -9,10 +9,18 @@ the three reproducible results quoted in the laboratory report:
 | Static analysis: 2 benign MMIO findings, 21 advisories, 1 warning | report §6, `docs/static-analysis.md` | **Yes** — `run_static_analysis.sh` |
 | Firmware size / RAM use | report §7.1 | **Approximately** — `run_size_analysis.sh` |
 | `platformio.ini` is consistent with `lib/` | — | **Yes** — `check_config.py` |
+| `diagram.json` is a valid Wokwi circuit | — | **Yes** — `wokwi-cli lint` (skipped if `wokwi-cli` is absent) |
 
-All four scripts are self-contained: they need only `gcc`, `clang`, `clang-tidy`
-and Python 3, and they never touch the network or the real STM32Cube/FreeRTOS
-packages.
+The first four scripts are self-contained: they need only `gcc`, `clang`,
+`clang-tidy` and Python 3, and they never touch the network or the real
+STM32Cube/FreeRTOS packages.
+
+The Wokwi diagram lint is the one pass with an external dependency. `wokwi-cli`
+is a single static binary (https://github.com/wokwi/wokwi-cli/releases), and
+`run_all.sh` reports the pass as *skipped* rather than failed when it is not on
+`PATH`, so the harness still passes on a machine that does not have it. Note
+that `lint --offline` needs no CI token; only `wokwi-cli test`, which actually
+executes the firmware, does.
 
 One further script is **not** part of `run_all.sh`, because it cannot run in an
 environment without PlatformIO:

@@ -8,6 +8,7 @@
 #   4. Application-only size breakdown         (clang, indicative)
 #   5. platformio.ini consistency              (local lib in lib_deps, default_envs,
 #                                               native build_src_filter / lib_ignore)
+#   6. Wokwi diagram lint                      (requires wokwi-cli; skipped if absent)
 #
 # Exits non-zero if any executed pass fails. Passes that cannot run on the
 # current host are reported as SKIPPED and do not fail the run.
@@ -26,7 +27,7 @@ SKIPPED=()
 banner() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 # --- 1. Real build (needs PlatformIO + the ARM toolchain) --------------------
-banner "1/5  Firmware build and memory footprint (PlatformIO)"
+banner "1/6  Firmware build and memory footprint (PlatformIO)"
 if command -v pio >/dev/null 2>&1; then
     if pio run -e bluepill_f103c8 2>&1 | tail -4; then
         PASSED+=("build")
@@ -48,20 +49,36 @@ else
 fi
 
 # --- 2. Unit tests ----------------------------------------------------------
-banner "2/5  Native unit tests"
+banner "2/6  Native unit tests"
 if bash tools/verify/run_tests.sh; then PASSED+=("tests"); else FAILED+=("tests"); fi
 
 # --- 3. Static analysis -----------------------------------------------------
-banner "3/5  Static analysis"
+banner "3/6  Static analysis"
 if bash tools/verify/run_static_analysis.sh; then PASSED+=("static-analysis"); else FAILED+=("static-analysis"); fi
 
 # --- 4. Application-only sizes ---------------------------------------------
-banner "4/5  Application-only size breakdown (clang, indicative)"
+banner "4/6  Application-only size breakdown (clang, indicative)"
 if bash tools/verify/run_size_analysis.sh; then PASSED+=("sizes"); else FAILED+=("sizes"); fi
 
 # --- 5. Configuration consistency ------------------------------------------
-banner "5/5  platformio.ini consistency"
+banner "5/6  platformio.ini consistency"
 if python3 tools/verify/check_config.py; then PASSED+=("config"); else FAILED+=("config"); fi
+
+# --- 6. Wokwi diagram lint --------------------------------------------------
+banner "6/6  Wokwi diagram lint"
+if command -v wokwi-cli >/dev/null 2>&1; then
+    # --warnings-as-errors matters: without it the CLI exits 0 even when it
+    # reports warnings, so a broken diagram would silently pass this check.
+    if wokwi-cli lint --offline --warnings-as-errors .; then
+        PASSED+=("wokwi-lint")
+    else
+        FAILED+=("wokwi-lint")
+    fi
+else
+    SKIPPED+=("wokwi-lint (wokwi-cli not installed)")
+    echo "wokwi-cli not found on PATH -- skipping the diagram lint."
+    echo "Install it from https://github.com/wokwi/wokwi-cli/releases to check diagram.json."
+fi
 
 # --- Summary ----------------------------------------------------------------
 echo
