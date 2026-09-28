@@ -22,7 +22,9 @@ typedef struct { uint32_t DataAlign; uint32_t ScanConvMode; uint32_t ContinuousC
 typedef struct { uint32_t Channel; uint32_t Rank; uint32_t SamplingTime; } ADC_ChannelConfTypeDef;
 typedef struct { uint32_t BaudRate; uint32_t WordLength; uint32_t StopBits; uint32_t Parity; uint32_t Mode; uint32_t HwFlowCtl; uint32_t OverSampling; } UART_InitTypeDef;
 
-typedef struct { void *Instance; } GPIO_TypeDef;
+typedef struct {
+    uint32_t CRL, CRH, IDR, ODR, BSRR, BRR, LCKR;
+} GPIO_TypeDef;
 typedef struct { void *Instance; I2C_InitTypeDef Init; } I2C_HandleTypeDef;
 typedef struct { void *Instance; ADC_InitTypeDef Init; } ADC_HandleTypeDef;
 typedef struct { void *Instance; TIM_Base_InitTypeDef Init; } TIM_HandleTypeDef;
@@ -37,6 +39,8 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define GPIOA ((GPIO_TypeDef*)0x40010800)
 #define GPIOB ((GPIO_TypeDef*)0x40010C00)
 #define GPIOC ((GPIO_TypeDef*)0x40011000)
+#define GPIOD ((GPIO_TypeDef*)0x40011400)
+#define GPIOE ((GPIO_TypeDef*)0x40011800)
 
 #define GPIO_PIN_0  ((uint16_t)0x0001)
 #define GPIO_PIN_1  ((uint16_t)0x0002)
@@ -121,6 +125,8 @@ typedef enum { EXTI0_IRQn=6, EXTI1_IRQn=7, EXTI2_IRQn=8, EXTI3_IRQn=9, EXTI4_IRQ
 #define __HAL_RCC_USART1_CLK_ENABLE() do{}while(0)
 #define __HAL_RCC_GPIOB_CLK_ENABLE() do{}while(0)
 #define __HAL_RCC_GPIOC_CLK_ENABLE() do{}while(0)
+#define __HAL_RCC_GPIOD_CLK_ENABLE() do{}while(0)
+#define __HAL_RCC_GPIOE_CLK_ENABLE() do{}while(0)
 #define __HAL_RCC_AFIO_CLK_ENABLE()  do{}while(0)
 #define __HAL_RCC_PWR_CLK_ENABLE()   do{}while(0)
 #define __HAL_AFIO_REMAP_SWJ_NOJTAG() do{}while(0)

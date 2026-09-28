@@ -253,7 +253,7 @@ progress and no deadlock. Note that **no independent watchdog (IWDG/WWDG) is con
 in this firmware, so "no watchdog reset" is not an observable pass criterion; the
 meaningful check is that all five tasks keep producing serial output and the OLED keeps
 refreshing. The blocking behaviour that could produce starvation is bounded: the longest
-critical section is the DHT22 read at ~20 ms (see `docs/limitations.md`), and no task
+critical section is the DHT22 read at ~5 ms (see `docs/limitations.md`), and no task
 holds the UART mutex indefinitely (`xSemaphoreTake` uses a 100 ms timeout).
 
 **Actual Result:** The system was left running for an extended session and all tasks continued to produce output. No deadlock or hang was observed. Because this observation predates the FreeRTOS port patch (L-07), it cannot establish that the *current* revision sustains a 60-minute run; that remains to be re-run.

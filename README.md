@@ -27,7 +27,7 @@ post-action rather than a pass of its own, so the table has eight rows for seven
 
 | Pass | Result |
 |---|---|
-| 1. Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.1%) | **PASS** |
+| 1. Firmware builds for `bluepill_f103c8` and fits (RAM 77.1%, Flash 55.3%) | **PASS** |
 | 1a. Build guard: patched port present, no PendSV store, pre-scheduler guards intact | **PASS** |
 | 2. 33 native unit tests | **PASS** |
 | 3. Static analysis, counts unchanged | **PASS** |
@@ -493,7 +493,7 @@ For a comprehensive analysis of all project limitations, their impact, mitigatio
 
 Key limitations include:
 
-- **DHT22 critical section**: The 1-wire protocol requires precise microsecond timing with interrupts masked, blocking SensorTask for ~5ms during readout (acceptable given the 2s sampling period)
+- **DHT22 critical section**: The 1-wire protocol requires precise microsecond timing with interrupts masked, blocking SensorTask for ~5 ms during readout (acceptable given the 1 s sampling period)
 - **Single buzzer alarm**: Currently only temperature threshold violations trigger the acoustic buzzer; humidity and motion alarms are visual-only
 - **No persistent storage**: Environmental telemetry is maintained in RAM and not logged to flash or external EEPROM/SD
 - **Fixed compile-time priorities**: Task priorities are statically declared in firmware rather than dynamically adjusted at runtime

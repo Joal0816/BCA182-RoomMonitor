@@ -266,7 +266,7 @@ for (;;) {
 }
 ```
 
-The wake time is captured once *before* the loop, so it is not re-initialised each iteration. `vTaskDelayUntil()` measures the period from the **start** of each iteration: even if `DHT22_Read()` holds the CPU for ~20 ms, the next wake time is still 1000 ms from the previous wake and no drift accumulates. `vTaskDelay()` would delay 1000 ms **after** the read completes, so the sampling period would stretch by the execution time of every iteration.
+The wake time is captured once *before* the loop, so it is not re-initialised each iteration. `vTaskDelayUntil()` measures the period from the **start** of each iteration: even if `DHT22_Read()` holds the CPU for ~5 ms, the next wake time is still 1000 ms from the previous wake and no drift accumulates. `vTaskDelay()` would delay 1000 ms **after** the read completes, so the sampling period would stretch by the execution time of every iteration.
 
 Note that `vTaskDelayUntil()` is the only periodic-delay call in the design. `MotionTask` and `InputTask` block indefinitely in `ulTaskNotifyTake()` and are released by the EXTI callbacks; `DisplayTask` calls `vTaskDelay(DISPLAY_REFRESH_MS)` *after* draining its queues non-blockingly.
 
@@ -276,7 +276,7 @@ Note that `vTaskDelayUntil()` is the only periodic-delay call in the design. `Mo
 
 ### 4.1 Key Design Decisions
 
-**vTaskDelayUntil() for periodic sampling:** As explained in Section 3.5, this eliminates accumulated drift in the 1-second sampling period. At 1,000 ms per sample a 24-hour run performs about 86,400 iterations; the DHT22 read holds the CPU for ~20 ms (`DHT22_Delay_us(18000)` alone accounts for 18 ms), so with `vTaskDelay()` each iteration would add that time, stretching the period to ~1,020 ms and losing up to ~1,728 seconds (≈29 minutes) of sampling cadence over the day. `vTaskDelayUntil()` keeps the period at a stable 1,000 ms regardless of execution time.
+**vTaskDelayUntil() for periodic sampling:** As explained in Section 3.5, this eliminates accumulated drift in the 1-second sampling period. At 1,000 ms per sample a 24-hour run performs about 86,400 iterations; the DHT22 read holds the CPU for ~5 ms (the reply itself — an 80/80/50 µs handshake plus 40 bits — inside the critical section; the 2 ms host start pulse is a `vTaskDelay()` outside it), so with `vTaskDelay()` each iteration would add that time, stretching the period to ~1,005 ms and losing up to ~432 seconds (≈7 minutes) of sampling cadence over the day. `vTaskDelayUntil()` keeps the period at a stable 1,000 ms regardless of execution time.
 
 **Separation of HAL from logic:** Hardware drivers (`src/app/hal/`) contain only peripheral access code (I2C writes, ADC reads, GPIO operations), while `src/app/logic/` holds the decision functions and the task bodies that call them. The `.c` files in the logic layer themselves call no HAL routines — they operate on plain values such as `float temperature` and `uint8_t motion_detected` — but their headers reach `main.h`, which pulls in `stm32f1xx_hal.h` and the FreeRTOS headers for the shared types and constants. That compile-time coupling is what keeps the tests off the production sources: each test transcribes the logic it exercises and compiles standalone, so the 33 unit tests run on the host PC (the `native` PlatformIO environment) without STM32 headers or hardware.
 
@@ -509,40 +509,40 @@ The static analysis confirms that the production code is free of detectable func
 | Resource | Used | Available | Utilization |
 |----------|------|-----------|-------------|
 | RAM | 15,796 bytes | 20,480 bytes | 77.1% |
-| Flash | 36,092 bytes | 65,536 bytes | 55.1% |
+| Flash | 36,244 bytes | 65,536 bytes | 55.3% |
 
-RAM usage (77.1%) is within acceptable limits but leaves only ~4.5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 77.8% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,032-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,057 B. Flash usage (55.1%) leaves ample space for additional features; the increase over the pre-instrumentation baseline is almost entirely the newlib float formatter pulled in by `-Wl,-u,_printf_float` (just under 3 KB) plus the diagnostic instrumentation.
+RAM usage (77.1%) is within acceptable limits but leaves only ~4.5 KB of headroom for additional features. The dominant RAM consumer is the FreeRTOS heap (12,288 B — 77.8% of all RAM in use), which holds the five task stacks, the queue storage, and the synchronization objects. The next largest are the OLED driver's two buffers — the 1,032-byte `oled` instance and its 1,025-byte bulk-transfer buffer — which together account for a further 2,057 B. Flash usage (55.3%) leaves ample space for additional features; the increase over the pre-instrumentation baseline is almost entirely the newlib float formatter pulled in by `-Wl,-u,_printf_float` (just under 3 KB) plus the diagnostic instrumentation.
 
 **Provenance.** Both figures are reproduced directly from a PlatformIO build of the current revision. The block is quoted verbatim from that build's output:
 
 ```
 $ pio run -e bluepill_f103c8
 RAM:   [========  ]  77.1% (used 15796 bytes from 20480 bytes)
-Flash: [======    ]  55.1% (used 36092 bytes from 65536 bytes)
+Flash: [======    ]  55.3% (used 36244 bytes from 65536 bytes)
 ```
 
 They were confirmed against the linked ELF with `size -A` / `nm`, which is the authoritative source because it measures the artifact that is actually flashed rather than the linker's summary:
 
 | ELF section | Size | Contributes to |
 |-------------|------|----------------|
-| `.text` | 32,872 B | Flash |
+| `.text` | 33,024 B | Flash |
 | `.rodata` | 2,732 B | Flash |
 | `.data` | 488 B | Flash **and** RAM |
 | `.bss` | 15,308 B | RAM |
 
-Flash = `.text + .rodata + .data` = 32,872 + 2,732 + 488 = **36,092 B**; RAM = `.data + .bss` = 488 + 15,308 = **15,796 B**. The RAM total reconciles with its principal consumers: 2,458 B of application statics + 12,288 B FreeRTOS heap + 488 B of initialised data + 562 B of kernel, CMSIS-RTOS and vendor statics. The largest single application static is the OLED driver's 1,032-byte `oled` instance, followed by its 1,025-byte `tx_buf`.
+Flash = `.text + .rodata + .data` = 33,024 + 2,732 + 488 = **36,244 B**; RAM = `.data + .bss` = 488 + 15,308 = **15,796 B**. The RAM total reconciles with its principal consumers: 2,458 B of application statics + 12,288 B FreeRTOS heap + 488 B of initialised data + 562 B of kernel, CMSIS-RTOS and vendor statics. The largest single application static is the OLED driver's 1,032-byte `oled` instance, followed by its 1,025-byte `tx_buf`.
 
-**Accounting note on the Flash figure.** The 36,092 B total is PlatformIO's flash metric, which counts code and initialised data but excludes the interrupt vector table and the C runtime initialisation arrays. Those occupy a further 280 B — `.isr_vector` 268 B, `.init_array` 4 B, `.fini_array` 4 B, plus alignment — so the image actually written to flash, `firmware.bin`, is **36,372 B (55.5%)**. Both figures are correct; they measure slightly different things. The smaller number is used in the table above because it is the one PlatformIO reports, and it is the convention used throughout this report. The difference does not affect any conclusion: at 55.5% the design still has well over 40% of flash free.
+**Accounting note on the Flash figure.** The 36,244 B total is PlatformIO's flash metric, which counts code and initialised data but excludes the interrupt vector table and the C runtime initialisation arrays. Those occupy a further 280 B — `.isr_vector` 268 B, `.init_array` 4 B, `.fini_array` 4 B, plus alignment — so the image actually written to flash, `firmware.bin`, is **36,524 B (55.7%)**. Both figures are correct; they measure slightly different things. The smaller number is used in the table above because it is the one PlatformIO reports, and it is the convention used throughout this report. The difference does not affect any conclusion: at 55.7% the design still has well over 40% of flash free.
 
 **Application-only figures (re-measured).** `tools/verify/run_size_analysis.sh` compiles every `.c` file under `src/` for Cortex-M3 and reports the application's own contribution separately from the vendor code. Run against the current source it reports:
 
 | Metric | Bytes |
 |--------|-------|
-| Application `.text` | 6,834 |
+| Application `.text` | 7,034 |
 | Application `.rodata` | 512 |
 | Application `.data` | 0 |
 | Application `.bss` | 2,458 |
-| **Application flash total** | **7,346** |
+| **Application flash total** | **7,546** |
 | **Application RAM total** | **2,458** |
 
 The remainder of the image is the STM32Cube HAL drivers and the FreeRTOS kernel. These figures are produced by clang's built-in ARM target rather than `arm-none-eabi-gcc`, so they are not byte-identical to what the real toolchain emits — `libc`'s `__main`/`system` shims and the exact HAL code paths differ — but they are a faithful *relative* indicator of where the application's own bytes go, and unlike the whole-image totals above they are reproducible from the current tree with a single command. The two largest application objects are `src/main.c` (1,526 B `.text`, 1,396 B `.bss`) and `src/drivers/diag.c` (1,216 B `.text`, 36 B `.bss`). The OLED driver contributes 1,124 B of `.text` and 500 B of `.rodata` — the latter being the 25-byte init sequence table plus the 5×7 font — and 1,025 B of `.bss` for the bulk-transfer buffer.
@@ -555,7 +555,7 @@ The following limitations remain in the current implementation:
 
 | # | Limitation | Impact | Resolution |
 |---|-----------|--------|-----------|
-| L-01 | DHT22 blocking read (~20 ms, interrupts masked) | SensorTask enters a critical section for the whole single-wire transaction. The fixed delays total ~19.2 ms and the 40 high-phase polls add ~1 ms, so the scheduler is blocked for ~20 ms — 2% of the 1 s period. `taskENTER_CRITICAL()` raises BASEPRI, so only interrupts above `configMAX_SYSCALL_INTERRUPT_PRIORITY` are deferred; SysTick runs at priority 0 and keeps ticking. | Accepted. Converting to interrupt-driven 1-wire adds complexity disproportionate to the 2% overhead. |
+| L-01 | DHT22 blocking read (~5 ms, interrupts masked) | SensorTask enters a critical section for the handshake and bit capture. The 2 ms host start pulse is produced with `vTaskDelay()` *before* the critical section, so only the reply itself (~4-5 ms) holds the scheduler off — 0.5% of the 1 s period. `taskENTER_CRITICAL()` raises BASEPRI, so only interrupts above `configMAX_SYSCALL_INTERRUPT_PRIORITY` are deferred; SysTick runs at priority 0 and keeps ticking. | Accepted. Converting to interrupt-driven 1-wire adds complexity disproportionate to the 0.5% overhead. |
 | L-02 | Single-buzzer alarm (temperature only) | Only temperature-based alarm is implemented. Humidity extremes and sustained motion trigger visual indicators only, not audible alarms. | Accepted for this laboratory scope. Future enhancement: multi-tone buzzer (1 kHz / 2 kHz / 500 Hz per condition). |
 | L-03 | No persistent storage | Sensor history is lost on power cycle. No flash or SD card logging. | Accepted as out-of-scope. Future enhancement: SPI SD card with FAT filesystem. |
 | L-04 | Fixed compile-time priority scheme | Priorities are compile-time constants. Runtime priority adjustment is possible with `vTaskPrioritySet()` but not implemented. | Accepted. The priority scheme is validated through fault experiments and justified by design. |
@@ -592,11 +592,21 @@ Four further defects surfaced while validating this driver under simulation:
 
 *The cycle counter was trusted on the strength of its own enable bit.* `DWT->CTRL` is a writable configuration register, so it reads back set as soon as software writes it — including on a core or emulator where `CYCCNT` never actually increments. The delay routine tested only that bit, so a non-advancing counter sent every timed loop into its full-length timeout spin rather than the intended wait. `DHT22_Delay_us()` now probes the counter once, by confirming that `DWT->CYCCNT` changes value, and caches the verdict for the lifetime of the program.
 
-*The bit decoder had no fallback at all.* Each bit was classified by reading `DWT->CYCCNT` directly, so on a platform without a working cycle counter every bit would have decoded as 0 and every frame would have failed its checksum. The decoder now uses the standard sampling method: each bit begins with a nominally 50 µs low pulse, after which a `0` stays high for 26-28 µs and a `1` for 70 µs, so a single read 30 µs after the rising edge discriminates the two without reference to any counter.
+*The bit decoder had no fallback at all.* Each bit was classified by reading `DWT->CYCCNT` directly, so on a platform without a working cycle counter every bit would have decoded as 0 and every frame would have failed its checksum. The decoder now measures each bit's high pulse and compares it against the 48 µs midpoint between the `0` (26-28 µs) and `1` (70 µs) encodings, and falls back to the standard sampling method — a single read 30 µs after the rising edge — when the counter is unusable.
 
 *The blocking settling delay held up the whole boot.* `DHT22_Init()` waited 2 s for the sensor to stabilise before returning, and because it is called from `main()` before `vTaskStartScheduler()`, that wait delayed every subsequent initialisation — including the first UART message and the start of `DisplayTask`. A sensor that is slow to become ready must not gate the rest of the firmware, so the wait was removed from the driver and moved into `SensorTask` as a `vTaskDelay(SENSOR_SETTLE_MS)`, where it costs the scheduler nothing and any later task can still start on time.
 
-*The polling guard was shorter than the protocol.* Each level poll used a `uint8_t` counter bounded at 100 iterations. Polling a GPIO through the HAL at 72 MHz costs roughly 6-8 cycles per iteration, so 80 µs — the longest level the sensor holds during a frame — spans several hundred iterations. The guard therefore expired mid-frame and returned `DHT22_TIMEOUT` on every read. The bound is now `DHT22_EDGE_TIMEOUT` (2000), which comfortably outlasts any legal level while still terminating on a disconnected or held line.
+*The polling guard was shorter than the protocol.* Each level poll used a `uint8_t` counter bounded at 100 iterations. Polling a GPIO through the HAL at 72 MHz costs roughly 6-8 cycles per iteration, so 80 µs — the longest level the sensor holds during a frame — spans several hundred iterations. The guard therefore expired mid-frame and returned `DHT22_TIMEOUT` on every read. Each edge wait is now bounded by a `DWT->CYCCNT` budget, compared as an unsigned difference of two samples so that a counter wrap cannot end the wait early, with an iteration guard as the fallback.
+
+**Challenge 3a: the sensor line was left floating.** This was the defect that produced the reported symptom — the OLED rendered, but the temperature and humidity fields stayed at the `T=nanC H=nan%` sentinel while the serial log repeated `[SENSOR] DHT22 read error`.
+
+*Symptom.* Every DHT22 read failed, on every sampling period, from the first boot onward. The sensor was present in the Wokwi diagram and wired correctly, so the failure was in the driver rather than the wiring.
+
+*Cause.* The driver switched the data pin between output and input by calling `HAL_GPIO_Init()` with `GPIO_MODE_INPUT` and `GPIO_NOPULL`. Releasing the line to a floating input removes the only thing holding it high: the DHT22 drives the bus low or lets it float, and the mandatory 4.7 kΩ pull-up — not present as a discrete part in the simulation — is what restores the idle high level. With the pin floating, the sensor's 80/80/50 µs handshake could never be observed, so the first level wait timed out on every transaction. `HAL_GPIO_Init()` was also too slow to use inside the timed protocol: it validates its arguments and touches RCC on every call, which does not fit in the few microseconds available between the sensor letting go of the line and starting its reply.
+
+*Fix.* Pin direction is now changed by a direct read-modify-write of the `CRL`/`CRH` configuration nibble. The line is driven low with `BRR` plus an output push-pull nibble, and released by asserting `BSRR` — which sets `ODR = 1` and therefore selects the pull-**up** rather than the pull-down for `CNF = 10` — before switching the nibble to input-with-pull-up. The internal pull-up now supplies the idle-high bias that the floating input did not.
+
+*Also changed.* The host start pulse was reduced from `DHT22_Delay_us(18000)` to a 2 ms `vTaskDelay()` — the datasheet asks for "at least 1 ms" — and moved outside the critical section, since a millisecond-scale busy-wait held inside it would gate the scheduler for 18 ms to no purpose. This is also why the L-01 blocking figure in section 7.2 fell from ~20 ms to ~5 ms.
 
 **Challenge 4: The scheduler never started — SysTick gated permanently by a pre-scheduler critical section.**
 

@@ -10,7 +10,7 @@
 
 | # | Limitation | Severity | Workaround | Status |
 |---|-----------|----------|------------|--------|
-| L-01 | DHT22 blocking read (~20 ms) | Low | Acceptable given 1 s sampling period (2% CPU) | Accepted |
+| L-01 | DHT22 blocking read (~5 ms) | Low | Acceptable given 1 s sampling period (0.5% CPU) | Accepted |
 | L-02 | Single buzzer (temperature only) | Low | Future: add humidity/motion alarms | Accepted |
 | L-03 | No persistent storage | Medium | Future: add SD card / flash logging | Documented |
 | L-04 | Fixed (compile-time) priority scheme | Low | Priorities validated during design phase | Accepted |
@@ -41,11 +41,11 @@
 
 ## Detailed Descriptions
 
-### L-01: DHT22 Blocking Read (~20 ms)
+### L-01: DHT22 Blocking Read (~5 ms)
 
-The DHT22 driver performs the entire single-wire read inside a `taskENTER_CRITICAL()` section. The fixed protocol delays total ~19.2 ms (`DHT22_Delay_us(18000)` plus `DHT22_Delay_us(40)` plus 40 × `DHT22_Delay_us(30)`), and the 40 high-phase polls add roughly 1 ms, so the scheduler is blocked for about 20 ms per read.
+The DHT22 driver performs the single-wire handshake and bit capture inside a `taskENTER_CRITICAL()` section. The 2 ms host start pulse is **not** inside it: it is produced with `vTaskDelay()` before the critical section is entered, so the scheduler is only held off for the reply itself — the 80/80/50 µs handshake plus 40 bits of 50 µs low and 26-70 µs high, roughly 4-5 ms.
 
-This blocking behavior is acceptable because 20 ms represents 2% of the 1-second sampling period. Note the scope precisely: `taskENTER_CRITICAL()` on this port raises BASEPRI to `configMAX_SYSCALL_INTERRUPT_PRIORITY`, so it does **not** disable all interrupts. SysTick (priority 0) still fires and the tick count stays accurate; only interrupts at or below `configMAX_SYSCALL_INTERRUPT_PRIORITY` are deferred, so no FreeRTOS API may be called from them during this window. The DHT22's own timing is the reason for the critical section: the protocol's microsecond windows cannot tolerate being preempted. Converting to interrupt-driven or DMA I/O would add complexity disproportionate to the impact.
+This blocking behavior is acceptable because 5 ms represents 0.5% of the 1-second sampling period. Note the scope precisely: `taskENTER_CRITICAL()` on this port raises BASEPRI to `configMAX_SYSCALL_INTERRUPT_PRIORITY`, so it does **not** disable all interrupts. SysTick (priority 0) still fires and the tick count stays accurate; only interrupts at or below `configMAX_SYSCALL_INTERRUPT_PRIORITY` are deferred, so no FreeRTOS API may be called from them during this window. The DHT22's own timing is the reason for the critical section: the protocol's microsecond windows cannot tolerate being preempted. Converting to interrupt-driven or DMA I/O would add complexity disproportionate to the impact.
 
 Resolution: Accepted as a design trade-off. No code change required.
 
@@ -454,7 +454,7 @@ For grading purposes, the functional requirements are verified through the combi
 
 **Evidence limits.** Three claims in this documentation could not be fully re-verified in the environment used to audit it. Each is flagged at its point of use. One of them has since been re-verified in full and one partially; the remainder is set out below.
 
-1. **Firmware size (report §7.1).** *Re-verified in full.* An earlier audit pass could not repeat the PlatformIO build, because the vendor ARM toolchain and the STM32Cube/FreeRTOS sources were not present in that environment. The build has since been run against the current revision and the figures in §7.1 are the result: `pio run -e bluepill_f103c8` reports RAM 15,796 / 20,480 B (77.1%) and Flash 36,092 / 65,536 B (55.1%), matching `size -A` on the linked ELF (Flash = `.text` 32,872 + `.rodata` 2,732 + `.data` 488; RAM = `.data` 488 + `.bss` 15,308). This supersedes both the RAM 14,356 B / Flash 26,304 B originally published in §7.1 — measured before the queue fan-out fix (`9d0d056`) and the OLED bulk-transfer fix (`647b343`) and never re-measured, an understatement of 1,028 B of RAM and 4 B of Flash — and the intermediate pre-instrumentation baseline of RAM 15,384 B / Flash 26,308 B.
+1. **Firmware size (report §7.1).** *Re-verified in full.* An earlier audit pass could not repeat the PlatformIO build, because the vendor ARM toolchain and the STM32Cube/FreeRTOS sources were not present in that environment. The build has since been run against the current revision and the figures in §7.1 are the result: `pio run -e bluepill_f103c8` reports RAM 15,796 / 20,480 B (77.1%) and Flash 36,244 / 65,536 B (55.3%), matching `size -A` on the linked ELF (Flash = `.text` 33,024 + `.rodata` 2,732 + `.data` 488; RAM = `.data` 488 + `.bss` 15,308). This supersedes both the RAM 14,356 B / Flash 26,304 B originally published in §7.1 — measured before the queue fan-out fix (`9d0d056`) and the OLED bulk-transfer fix (`647b343`) and never re-measured, an understatement of 1,028 B of RAM and 4 B of Flash — and the intermediate pre-instrumentation baseline of RAM 15,384 B / Flash 26,308 B.
 
    The increase over that intermediate baseline is accounted for: the diagnostic instrumentation described in report §7.5 (`src/drivers/diag.c`: 1,216 B `.text`, 36 B `.bss`) and the `-Wl,-u,_printf_float` link flag, which pulls the newlib float formatter into the image at a cost of just under 3 KB. `tools/verify/run_size_analysis.sh` remains available as an application-only cross-check, but it uses clang's ARM target rather than `arm-none-eabi-gcc`, so its absolutes are indicative rather than authoritative.
 

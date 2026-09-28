@@ -347,7 +347,7 @@ If a sensor read timed out or suffered parity error, default zero values trigger
 
 ## Limitations
 
-1. **DHT22 Blocking Read (~20 ms):** The single-wire read sequence runs inside `taskENTER_CRITICAL()`, holding the scheduler off for roughly 20 ms. That is 2% of the 1-second sampling period and is deemed acceptable; the critical section raises BASEPRI rather than masking all interrupts, so SysTick still ticks.
+1. **DHT22 Blocking Read (~5 ms):** The single-wire reply — an 80/80/50 µs handshake plus 40 bits — runs inside `taskENTER_CRITICAL()`, holding the scheduler off for roughly 5 ms. That is 0.5% of the 1-second sampling period and is deemed acceptable; the critical section raises BASEPRI rather than masking all interrupts, so SysTick still ticks. The 2 ms host start pulse is produced by `vTaskDelay()` *before* the critical section, so it does not contribute to the blocking window.
 2. **Single Buzzer Alarm:** Currently only temperature out-of-range conditions sound the buzzer; humidity and motion alarms are visual-only.
 3. **No Persistent Storage:** Telemetry is stored purely in volatile RAM; power cycling clears historical data.
 4. **Fixed Task Priorities:** Task priorities are configured statically at compile time rather than dynamically adapted.

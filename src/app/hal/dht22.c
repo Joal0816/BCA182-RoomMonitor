@@ -2,26 +2,90 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-/* The longest level the DHT22 holds during a frame is 80 us.  Polling a GPIO
-   through HAL at 72 MHz costs roughly 6-8 cycles per iteration, so 80 us spans
-   several hundred iterations; the previous bound of 100 expired mid-frame and
-   reported a timeout on every single read. */
+/* Only one port line can be addressed by this driver; a bounded loop keeps the
+   index computation from running past the register width if a mis-sized pin
+   mask (e.g. 0x0000) is ever passed in. */
+#define DHT22_PIN_COUNT 16U
+
+/* Longest level the sensor holds during a frame is 80 us.  Polling a GPIO with
+   a direct register read costs only a few cycles per iteration, so this guard
+   simply has to outlast a reply; it is a bound, not a calibrated delay.  Used
+   only when the DWT cycle counter is unavailable. */
 #define DHT22_EDGE_TIMEOUT 2000U
 
-static void DHT22_SetOutput(DHT22_t *dht) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = dht->pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(dht->port, &GPIO_InitStruct);
+/* Host start signal.  The datasheet asks for the line to be held low for at
+   least 1 ms; the sensor answers 20-40 us after the line is released. */
+#define DHT22_START_LOW_MS 2U
+
+/* Every edge of the reply arrives within 100 us of the previous one: 80 us for
+   each of the two response pulses, and 50 us low plus 26/70 us high per bit. */
+#define DHT22_EDGE_US 100U
+
+/* A data bit is a 26-28 us high pulse for "0" and 70 us for "1".  Measuring the
+   high pulse and comparing it against the midpoint (48 us) does not depend on
+   the CPU clock, whereas sampling at one fixed instant sits right on the
+   boundary between the two encodings. */
+#define DHT22_ONE_THRESHOLD_US 48U
+
+/* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
+#define DHT22_CNF_INPUT_PULL  0x8U /* input, pull-up/pull-down (ODR picks pull-up) */
+#define DHT22_CNF_OUT_PP_2MHZ 0x2U /* output push-pull, 2 MHz */
+
+#define DHT22_DWT_CYCCNTENA (1UL << 0UL)
+
+static uint32_t DHT22_PinIndex(uint16_t pin) {
+    uint32_t index = 0;
+    while (index < DHT22_PIN_COUNT && (pin & (1UL << index)) == 0U) {
+        index++;
+    }
+    return index;
 }
 
-static void DHT22_SetInput(DHT22_t *dht) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = dht->pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(dht->port, &GPIO_InitStruct);
+/* Direction changes are a direct read-modify-write of the CRL/CRH nibble.
+   HAL_GPIO_Init cannot be used here: it validates its arguments and touches RCC
+   on every call, and the release-then-listen step has to complete within the
+   few microseconds between the sensor letting go of the line and starting its
+   reply. */
+static void DHT22_SetConfig(DHT22_t *dht, uint32_t config) {
+    uint32_t index = DHT22_PinIndex(dht->pin);
+    volatile uint32_t *reg;
+    uint32_t shift;
+    uint32_t value;
+
+    if (index < 8U) {
+        reg = &dht->port->CRL;
+        shift = index * 4U;
+    } else {
+        reg = &dht->port->CRH;
+        shift = (index - 8U) * 4U;
+    }
+
+    value = *reg;
+    value &= ~(0xFUL << shift);
+    value |= config << shift;
+    *reg = value;
+}
+
+static void DHT22_DriveLow(DHT22_t *dht) {
+    dht->port->BRR = dht->pin;
+    DHT22_SetConfig(dht, DHT22_CNF_OUT_PP_2MHZ);
+}
+
+/* Returning the line to an input is not enough on its own: with GPIO_NOPULL the
+   pin is left floating as soon as the sensor stops driving it, so nothing pulls
+   it back high and the reply never starts.  Selecting input with the internal
+   pull-up (CNF = 10) and ODR = 1 is what supplies that bias. */
+static void DHT22_Release(DHT22_t *dht) {
+    dht->port->BSRR = dht->pin; /* ODR = 1 selects the pull-up, not the pull-down */
+    DHT22_SetConfig(dht, DHT22_CNF_INPUT_PULL);
+}
+
+static inline uint8_t DHT22_IsHigh(const DHT22_t *dht) {
+    return (dht->port->IDR & dht->pin) != 0U;
+}
+
+static uint32_t DHT22_UsToCycles(uint32_t us) {
+    return us * (SystemCoreClock / 1000000U);
 }
 
 /* DWT_CTRL is a writable configuration register: it reads back set as soon as
@@ -52,13 +116,13 @@ static void DHT22_Delay_us(uint32_t us) {
         return;
     }
 
-    uint32_t cycles = us * (SystemCoreClock / 1000000U);
+    uint32_t cycles = DHT22_UsToCycles(us);
 
     if (DHT22_CycleCounterReady()) {
         uint32_t start = DWT->CYCCNT;
-        uint32_t timeout = cycles + (SystemCoreClock / 100U);
         while ((DWT->CYCCNT - start) < cycles) {
-            if (--timeout == 0) break;
+            /* A live counter always advances past `cycles`, so this loop is
+               bounded without needing a second timeout. */
         }
     } else {
         /* Fallback: approximate delay using volatile loop, calibrated at
@@ -66,6 +130,42 @@ static void DHT22_Delay_us(uint32_t us) {
         uint32_t count = cycles / 4U;
         while (count--) { __asm__ volatile("nop"); }
     }
+}
+
+/* Wait until the data line reaches `high` (1) or `low` (0).  Every edge of a
+   frame follows the previous one within DHT22_EDGE_US, so that constant is the
+   bound for all of them.  The cycle budget is compared as an unsigned
+   difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
+   time rather than a huge one and cannot end the wait early. */
+static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high) {
+    if (DHT22_CycleCounterReady()) {
+        uint32_t budget = DHT22_UsToCycles(DHT22_EDGE_US);
+        uint32_t start = DWT->CYCCNT;
+        for (;;) {
+            if (DHT22_IsHigh(dht) == high) {
+                return 1U;
+            }
+            if ((DWT->CYCCNT - start) > budget) {
+                return 0U;
+            }
+        }
+    }
+
+    uint32_t guard = DHT22_EDGE_TIMEOUT;
+    while (guard-- != 0U) {
+        if (DHT22_IsHigh(dht) == high) {
+            return 1U;
+        }
+    }
+    return 0U;
+}
+
+static uint8_t DHT22_WaitHigh(const DHT22_t *dht) {
+    return DHT22_WaitLevel(dht, 1U);
+}
+
+static uint8_t DHT22_WaitLow(const DHT22_t *dht) {
+    return DHT22_WaitLevel(dht, 0U);
 }
 
 static uint8_t DHT22_ComputeChecksum(uint8_t *data) {
@@ -82,77 +182,66 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
     dht->temperature = 0.0f;
     dht->humidity = 0.0f;
 
+    /* MX_GPIO_Init() enables the GPIO port clocks during boot, before this
+       driver is initialised.  Unlike HAL_GPIO_Init, the direct CRL/CRH writes
+       used here cannot enable a clock themselves, so the precondition is
+       documented in dht22.h rather than papered over. */
+
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    DWT->CTRL |= DHT22_DWT_CYCCNTENA;
 
-    DHT22_SetOutput(dht);
-    HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_SET);
+    DHT22_Release(dht);
 
     /* The sensor needs about 1 s to stabilise after power-up, but blocking
        here would stall the whole boot before the scheduler even starts.
        SensorTask absorbs that settle time with an RTOS delay instead. */
 }
 
-uint8_t DHT22_Read(DHT22_t *dht) {
-    uint8_t data[5] = {0};
-    uint32_t timeout;
+/* Drives the start signal and captures the 40 high-pulse widths of one frame.
+   The critical section covers only the handshake and the bits: it stops SysTick
+   on the patched port, so the millisecond-scale start pulse is produced with
+   vTaskDelay before entering it rather than by a busy-wait inside. */
+static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
+    uint8_t measure = DHT22_CycleCounterReady();
+
+    DHT22_DriveLow(dht);
+    vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
 
     taskENTER_CRITICAL();
 
-    DHT22_SetOutput(dht);
-    HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_RESET);
-    DHT22_Delay_us(18000);
-    HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_SET);
-    DHT22_Delay_us(40);
+    DHT22_Release(dht);
 
-    DHT22_SetInput(dht);
-
-    timeout = DHT22_EDGE_TIMEOUT;
-    while (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_SET) {
-        if (--timeout == 0) {
-            taskEXIT_CRITICAL();
-            return DHT22_TIMEOUT;
-        }
-    }
-
-    timeout = DHT22_EDGE_TIMEOUT;
-    while (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_RESET) {
-        if (--timeout == 0) {
-            taskEXIT_CRITICAL();
-            return DHT22_TIMEOUT;
-        }
-    }
-
-    timeout = DHT22_EDGE_TIMEOUT;
-    while (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_SET) {
-        if (--timeout == 0) {
-            taskEXIT_CRITICAL();
-            return DHT22_TIMEOUT;
-        }
+    /* Response signal: the sensor pulls the line low for 80 us, high for 80 us,
+       then opens the first bit with a 50 us low pulse. */
+    if (!DHT22_WaitLow(dht) ||
+        !DHT22_WaitHigh(dht) ||
+        !DHT22_WaitLow(dht)) {
+        taskEXIT_CRITICAL();
+        return DHT22_TIMEOUT;
     }
 
     for (int i = 0; i < 40; i++) {
-        timeout = DHT22_EDGE_TIMEOUT;
-        while (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_RESET) {
-            if (--timeout == 0) {
+        /* Rising edge: end of the 50 us low pulse that opens every bit. */
+        if (!DHT22_WaitHigh(dht)) {
+            taskEXIT_CRITICAL();
+            return DHT22_TIMEOUT;
+        }
+
+        if (measure) {
+            uint32_t rise = DWT->CYCCNT;
+            if (!DHT22_WaitLow(dht)) {
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
-        }
-
-        /* Every bit starts with a 50 us low pulse.  A "0" then stays high for
-           26-28 us and a "1" for 70 us, so sampling once past the 30 us mark
-           discriminates the two without needing a cycle counter. */
-        DHT22_Delay_us(30);
-        data[i / 8] <<= 1;
-        if (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_SET) {
-            data[i / 8] |= 1;
-        }
-
-        timeout = DHT22_EDGE_TIMEOUT;
-        while (HAL_GPIO_ReadPin(dht->port, dht->pin) == GPIO_PIN_SET) {
-            if (--timeout == 0) {
+            high_us[i] = (uint16_t)((DWT->CYCCNT - rise) / (SystemCoreClock / 1000000U));
+        } else {
+            /* Without a cycle counter the width cannot be measured, so sample
+               past the 30 us mark and synthesise a width that falls on the
+               correct side of the decode threshold. */
+            DHT22_Delay_us(30);
+            high_us[i] = DHT22_IsHigh(dht) ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
+            if (!DHT22_WaitLow(dht)) {
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
@@ -160,6 +249,27 @@ uint8_t DHT22_Read(DHT22_t *dht) {
     }
 
     taskEXIT_CRITICAL();
+
+    /* Leave the line released so the sensor can drive the next frame. */
+    DHT22_Release(dht);
+    return DHT22_OK;
+}
+
+uint8_t DHT22_Read(DHT22_t *dht) {
+    uint16_t high_us[40];
+    uint8_t data[5] = {0};
+
+    uint8_t status = DHT22_CaptureFrame(dht, high_us);
+    if (status != DHT22_OK) {
+        return status;
+    }
+
+    for (int i = 0; i < 40; i++) {
+        data[i / 8] <<= 1;
+        if (high_us[i] > DHT22_ONE_THRESHOLD_US) {
+            data[i / 8] |= 1;
+        }
+    }
 
     uint8_t crc = DHT22_ComputeChecksum(data);
     if (crc != data[4]) {
