@@ -51,7 +51,7 @@ the serial port emits:
 
 An earlier revision stopped after its boot lines; the cause is documented as **L-07** in
 [docs/limitations.md](docs/limitations.md). Wokwi is the intended end-to-end simulator and
-its diagram lints cleanly offline, but the free CI quota was exhausted before a run could be
+its diagram lints cleanly offline, but the CI token available at the time no longer authenticates
 taken against the fixed revision. Renode was used instead because it models the NVIC, SysTick
 and USART faithfully; it does **not** model the SSD1306 or the DHT22, so the per-peripheral
 `Actual Result` entries in the report remain development-time observations. Physical-hardware

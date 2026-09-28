@@ -384,7 +384,7 @@ arithmetic in `InputTask()`, and the 15-second timeout matches `INACTIVE_TIMEOUT
 > That hang has since been root-caused, fixed, and replayed successfully (Challenge 4,
 > section 7.3). Against the fixed revision, the boot log does show the scheduler starting
 > and all five `[TASK] … entered` banners — reproduced under Renode rather than Wokwi,
-> because the free Wokwi CI quota was exhausted before a fixed-revision run could be taken.
+> because the CI token available at the time no longer authenticates, so no fixed-revision run could be taken.
 > The `Development status` column below therefore remains the original
 > development-time observation and is *not* itself a current Wokwi result. What is now
 > established is that the firmware reaches every task; the individual display and buzzer
