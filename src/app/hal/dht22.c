@@ -162,10 +162,10 @@ static void DHT22_Delay_us(uint32_t us) {
    swappable by clang-tidy -- while staying free of shared state, so two callers
    cannot disturb each other's bound.  The budget is compared as an unsigned
    difference of two CYCCNT samples, so a counter wrap reads as a small elapsed
-   time rather than a huge one and cannot end the wait early.  When no cycle
-   counter is available the budget goes unused: the fallback counts iterations
-   against the fixed DHT22_EDGE_TIMEOUT, because there is no clock to convert
-   microseconds with. */
+   time rather than a huge one and cannot end the wait early.  When the DWT
+   cycle counter is not running the budget is unused -- it is denominated in DWT
+   cycles, which cannot then be measured -- so the fallback counts iterations
+   against the fixed DHT22_EDGE_TIMEOUT instead. */
 static uint8_t DHT22_WaitLevel(const DHT22_t *dht, uint8_t high,
                                const uint32_t *budget_cycles) {
     if (DHT22_CycleCounterReady()) {

@@ -24,8 +24,11 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin);
 
 /* Reads one frame.  The driver owns a single data line and produces the start
    pulse outside its critical section, so one DHT22_t must not be read from two
-   tasks (or from a task and an ISR) at once: the start pulses would interleave
-   and corrupt the frame.  The application calls this from SensorTask alone. */
+   tasks (or from a task and an ISR) at once: the start pulses would interleave,
+   and because the decoded bytes and the temperature/humidity fields are
+   published after the critical section is left, the second caller could also
+   observe a plausible but wrong frame.  Nothing enforces the contract; the
+   application calls this from SensorTask alone. */
 uint8_t DHT22_Read(DHT22_t *dht);
 float DHT22_GetTemperature(const DHT22_t *dht);
 float DHT22_GetHumidity(const DHT22_t *dht);
