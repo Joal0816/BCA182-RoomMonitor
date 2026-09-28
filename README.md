@@ -325,7 +325,7 @@ Wokwi never compiles the firmware — it loads whatever `pio run` last produced.
 pio run -t clean && pio run
 ```
 
-**2. Confirm the port workaround is in the image.** The build log must contain:
+**2. Confirm the port fix is in the image.** The build log must contain:
 
 ```
 [port-patch] OK: patched ARM_CM3 port.o + include/portmacro.h in the image, no ICSR PendSV store, pre-scheduler critical sections deferred
@@ -343,9 +343,9 @@ That single line asserts four things: the patched port object is in the build, `
 
 | Observation | Meaning |
 |-------------|---------|
-| `[TASK] DisplayTask entered` and the OLED shows `Initializing...` within ~1 s | Working. The `svc` was not masked. |
+| All five `[TASK] … entered` lines appear, and the OLED shows `Initializing...` within ~1 s | Working. The scheduler started and every task is running. |
 | `[TASK] SensorTask entered` and `[SENSOR] T=25.0C H=50.0% L=500 M=0` | Working, and the float formatter is linked. |
-| The `[DIAG] VTOR` line and the two `[MAIN]` lines, then silence | The boot path through `vTaskStartScheduler()` completes but no task is entered. This is the current observed state of the project and is not yet resolved — see L-07 in [docs/limitations.md](docs/limitations.md). It is **not** by itself proof that the port patch is missing; confirm step 2 first. |
+| The `[DIAG] VTOR` line and the two `[MAIN]` lines, then silence | The boot path through `vTaskStartScheduler()` completes but no task is entered. This was the project's own symptom and it is now **fixed** — if you see it, the binary is stale or the port patch is missing, so re-run step 1 and confirm step 2. History and evidence: L-07 in [docs/limitations.md](docs/limitations.md). |
 | `[MAIN] FATAL: xTaskCreate failed` or `ASSERT:`/`[FATAL]` output | A specific failure was detected and reported. The message names it. |
 | `[OLED] init failed: no ACK from 0x3C` | The panel is not acknowledging. A wiring or simulator fault, not a software one. |
 | `[SENSOR] T=0.0C H=0.0%` or garbage digits | The `%f` formatter is not linked; check `-Wl,-u,_printf_float` in `platformio.ini`. |
