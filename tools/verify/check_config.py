@@ -10,7 +10,11 @@ with no `firmware.elf`, and Wokwi (which loads the last built binary) shows a
 dead board.
 
 This check catches that mistake, plus a few neighbouring ones, without needing
-PlatformIO installed.
+PlatformIO installed.  The neighbours it covers are the build-flag omissions that
+fail quietly (-DSTM32F103xB, -DUSE_HAL_DRIVER, the printf-float linker flag, the
+extra_scripts hook) and the two settings that keep a bare `pio run` from dragging
+the host-only `env:native` into a firmware build: `default_envs` in `[platformio]`
+and `build_src_filter` in `[env:native]`.
 
 Exit status is 0 when the configuration is consistent, 1 otherwise.
 """
@@ -94,6 +98,22 @@ def main():
     # --- neighbouring mistakes ----------------------------------------------
     device = sections.get("env:bluepill_f103c8", {})
     native = sections.get("env:native", {})
+    platform = sections.get("platformio", {})
+
+    # A bare `pio run` builds every environment unless default_envs narrows it.
+    # The native environment has no STM32Cube HAL, so building src/ for it always
+    # fails -- see the comment on default_envs in platformio.ini.
+    if device and native:
+        if native.get("build_src_filter", "").replace(" ", "") != "-<*>":
+            problems.append(
+                "env:native: build_src_filter is not '-<*>', so src/ would be "
+                "compiled for the host and fail on stm32f1xx_hal.h"
+            )
+        if platform.get("default_envs", "").strip() != "bluepill_f103c8":
+            problems.append(
+                "platformio: default_envs must be bluepill_f103c8, otherwise a "
+                "bare `pio run` also builds env:native and reports FAILED"
+            )
 
     if device:
         flags = device.get("build_flags", "")

@@ -35,10 +35,26 @@ stops — no `firmware.elf`, no `firmware.bin`, and no error that names the caus
 Wokwi loads the last successfully built binary, so the visible symptom is a dead
 board rather than a build error.
 
-`check_config.py` catches that mistake, plus a few neighbouring ones (missing
-`-DSTM32F103xB`, a `[env:native]` that would try to compile the Cortex-M3 port
-for the host), without needing PlatformIO installed. It is a static check of the
-configuration against the contents of `lib/`.
+`check_config.py` catches that mistake, plus a few neighbouring ones, without
+needing PlatformIO installed. It is a static check of the configuration against
+the contents of `lib/`. The full set:
+
+| Check | Why it matters |
+|-------|----------------|
+| No local library named in `lib_deps` | Registry fetch fails and aborts the build before linking |
+| `-DSTM32F103xB` and `-DUSE_HAL_DRIVER` present | Wrong part / no HAL driver selection |
+| `-Wl,-u,_printf_float` present | Otherwise `%.1f` prints literal conversion text — a *note*, not a failure |
+| `extra_scripts` present | Otherwise the port-patch guard never runs and a missing Wokwi workaround stays silent |
+| `env:native` ignores `freertos_port_patch` | Cortex-M3 assembly would be compiled for the host |
+| `env:native` has `build_src_filter = -<*>` | Otherwise `src/` is compiled for the host and fails on `stm32f1xx_hal.h` |
+| `platformio` sets `default_envs = bluepill_f103c8` | Otherwise a bare `pio run` also builds `env:native` and reports FAILED |
+
+The last two guard the same trap from both sides. A bare `pio run` builds every
+environment in the file, and `env:native` has no STM32Cube HAL — so without
+`default_envs` the firmware itself builds perfectly and the run still reports
+`FAILED`, because four headers under `src/app/hal/` cannot find
+`stm32f1xx_hal.h`. `pio test -e native` is unaffected: `pio test` does not build
+`src/` unless `test_build_src` is enabled.
 
 ## Why stub headers exist
 

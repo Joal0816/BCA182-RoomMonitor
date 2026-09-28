@@ -224,6 +224,15 @@ pio test -e native
 pio test -e bluepill_f103c8
 ```
 
+> **Use `pio test`, not `pio run`, for the native environment.** `[env:native]`
+> exists only to run `test/` on the host PC; its `src/` is excluded, because
+> every header under `src/app/hal/` includes `stm32f1xx_hal.h` and there is no
+> STM32Cube HAL for a native build. `platformio.ini` sets
+> `default_envs = bluepill_f103c8` so that a bare `pio run` builds only the
+> firmware — without it, `pio run` would also try the native environment, fail
+> on the missing HAL header, and report `FAILED` even though the firmware built
+> correctly.
+
 ### Static Analysis
 ```bash
 pio check

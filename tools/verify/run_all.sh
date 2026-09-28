@@ -6,7 +6,8 @@
 #   2. Native unit tests                       (33 expected)
 #   3. Static analysis                         (1 + 21 + 1 findings expected)
 #   4. Application-only size breakdown         (clang, indicative)
-#   5. platformio.ini consistency              (no local library named in lib_deps)
+#   5. platformio.ini consistency              (local lib in lib_deps, default_envs,
+#                                               native build_src_filter / lib_ignore)
 #
 # Exits non-zero if any executed pass fails. Passes that cannot run on the
 # current host are reported as SKIPPED and do not fail the run.
