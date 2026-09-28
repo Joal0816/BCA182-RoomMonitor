@@ -26,14 +26,20 @@ void SensorTask(void *pvParameters) {
         data.timestamp = xTaskGetTickCount();
         uint8_t read_ok = 1;
 
-        if (DHT22_Read(params->dht22) == DHT22_OK) {
+        uint8_t dht_status = DHT22_Read(params->dht22);
+        if (dht_status == DHT22_OK) {
             data.temperature = DHT22_GetTemperature(params->dht22);
             data.humidity = DHT22_GetHumidity(params->dht22);
         } else {
             data.temperature = NAN;
             data.humidity = NAN;
             read_ok = 0;
-            UART_Mutex_Printf(params->uart_mutex, "[SENSOR] DHT22 read error\r\n");
+            /* The status separates a silent sensor (TIMEOUT) from a reply that
+               arrived but did not check out (ERROR) -- the first thing worth
+               knowing when a read fails in the simulator. */
+            UART_Mutex_Printf(params->uart_mutex,
+                             "[SENSOR] DHT22 read error (status=%u)\r\n",
+                             (unsigned)dht_status);
         }
 
         if (LDR_Read(params->ldr) == LDR_OK) {

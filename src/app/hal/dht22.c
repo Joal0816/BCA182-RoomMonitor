@@ -17,9 +17,18 @@
    least 1 ms; the sensor answers 20-40 us after the line is released. */
 #define DHT22_START_LOW_MS 2U
 
-/* Every edge of the reply arrives within 100 us of the previous one: 80 us for
-   each of the two response pulses, and 50 us low plus 26/70 us high per bit. */
-#define DHT22_EDGE_US 100U
+/* Timeout bound for any single level of the reply: 80 us for each of the two
+   response pulses, and 50 us low plus 26/70 us high per bit.  This is a bound,
+   not an expected value, so it is deliberately generous -- it must still
+   outlast a reply when the firmware's idea of the CPU clock (SystemCoreClock)
+   and the rate DWT->CYCCNT actually advances at disagree, which is exactly the
+   case on simulators that model the core clock and the RCC separately. */
+#define DHT22_EDGE_US 1000U
+
+/* Width of the sensor's response high pulse.  It is a fixed part of the
+   protocol, so the driver times it and divides by this to learn how many
+   counter cycles a microsecond really is. */
+#define DHT22_RESPONSE_HIGH_US 80U
 
 /* A data bit is a 26-28 us high pulse for "0" and 70 us for "1".  Measuring the
    high pulse and comparing it against the midpoint (48 us) does not depend on
@@ -204,6 +213,8 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
    vTaskDelay before entering it rather than by a busy-wait inside. */
 static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint8_t measure = DHT22_CycleCounterReady();
+    /* Nominal scale, replaced below by one measured from the reply itself. */
+    uint32_t cycles_per_us = SystemCoreClock / 1000000U;
 
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
@@ -213,12 +224,33 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     DHT22_Release(dht);
 
     /* Response signal: the sensor pulls the line low for 80 us, high for 80 us,
-       then opens the first bit with a 50 us low pulse. */
-    if (!DHT22_WaitLow(dht) ||
-        !DHT22_WaitHigh(dht) ||
-        !DHT22_WaitLow(dht)) {
+       then opens the first bit with a 50 us low pulse.  The 80 us high pulse is
+       timed here because its width is fixed: dividing its measured length by 80
+       turns the counter's own ticks into microseconds.  Deriving the scale from
+       the counter, rather than trusting SystemCoreClock, is what keeps the bit
+       decode correct when the two do not agree. */
+    if (!DHT22_WaitLow(dht) || !DHT22_WaitHigh(dht)) {
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
+    }
+
+    if (measure) {
+        uint32_t rise = DWT->CYCCNT;
+        if (!DHT22_WaitLow(dht)) {
+            taskEXIT_CRITICAL();
+            return DHT22_TIMEOUT;
+        }
+        uint32_t response_cycles = DWT->CYCCNT - rise;
+        if (response_cycles >= DHT22_RESPONSE_HIGH_US) {
+            cycles_per_us = response_cycles / DHT22_RESPONSE_HIGH_US;
+        }
+    } else if (!DHT22_WaitLow(dht)) {
+        taskEXIT_CRITICAL();
+        return DHT22_TIMEOUT;
+    }
+
+    if (cycles_per_us == 0U) {
+        cycles_per_us = 1U;
     }
 
     for (int i = 0; i < 40; i++) {
@@ -234,7 +266,7 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
-            high_us[i] = (uint16_t)((DWT->CYCCNT - rise) / (SystemCoreClock / 1000000U));
+            high_us[i] = (uint16_t)((DWT->CYCCNT - rise) / cycles_per_us);
         } else {
             /* Without a cycle counter the width cannot be measured, so sample
                past the 30 us mark and synthesise a width that falls on the

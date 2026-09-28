@@ -673,7 +673,7 @@ with a mirrored early return in `vPortExitCritical()`. This is safe: before the 
 [TASK] SensorTask entered
 [TASK] DisplayTask entered
 [OLED] frame transfer failed (panel not ACKing)
-[SENSOR] DHT22 read error
+[SENSOR] DHT22 read error (status=2)
 [SENSOR] LDR read error
 [SENSOR] T=nanC H=nan% L=0 M=0
 ```
