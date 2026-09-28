@@ -52,9 +52,12 @@ the contents of `lib/`. The full set:
 The last two guard the same trap from both sides. A bare `pio run` builds every
 environment in the file, and `env:native` has no STM32Cube HAL — so without
 `default_envs` the firmware itself builds perfectly and the run still reports
-`FAILED`, because four headers under `src/app/hal/` cannot find
-`stm32f1xx_hal.h`. `pio test -e native` is unaffected: `pio test` does not build
-`src/` unless `test_build_src` is enabled.
+`FAILED`, because `stm32f1xx_hal.h` cannot be found. Almost nothing under `src/`
+is host-compilable: 16 of the 17 translation units reach the HAL header, the six
+driver headers in `src/app/hal/` and `src/main.h` including it directly and the
+rest inheriting it through `main.h`, with only `src/drivers/diag.c` free of it.
+`pio test -e native` is unaffected: `pio test` does not build `src/` unless
+`test_build_src` is enabled.
 
 ## Why stub headers exist
 
