@@ -266,9 +266,8 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        sensor was still about to satisfy.  The handshake has nothing but the
        firmware's belief to go on, and neither has the bit loop in the one corner
        where the response pulse measured short and the firmware also under-states
-       the clock: there no evidence available here yields a rate above the real
-       one, so a bad frame is then reported as a timeout rather than as
-       DHT22_ERROR. */
+       the clock: no evidence available here yields a rate above the real one, so
+       a bad frame is then reported as a timeout rather than as DHT22_ERROR. */
     uint32_t cycles_per_us = nominal_scale;
     uint32_t bound_scale = nominal_scale;
     uint32_t wait_budget = DHT22_EDGE_US * bound_scale;
