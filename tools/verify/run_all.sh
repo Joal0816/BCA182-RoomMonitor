@@ -4,12 +4,13 @@
 #
 #   1. Firmware build + real memory footprint  (requires PlatformIO; skipped if absent)
 #   2. Native unit tests                       (33 expected)
-#   3. Static analysis                         (1 + 21 + 1 findings expected)
-#   4. Application-only size breakdown         (clang, indicative)
-#   5. platformio.ini consistency              (local lib in lib_deps, default_envs,
+#   3. DHT22 host simulation                   (14 expected)
+#   4. Static analysis                         (1 + 21 + 1 findings expected)
+#   5. Application-only size breakdown         (clang, indicative)
+#   6. platformio.ini consistency              (local lib in lib_deps, default_envs,
 #                                               native build_src_filter / lib_ignore)
-#   6. Wokwi diagram lint                      (requires wokwi-cli; skipped if absent)
-#   7. Report PDF freshness                    (skipped if WeasyPrint is absent)
+#   7. Wokwi diagram lint                      (requires wokwi-cli; skipped if absent)
+#   8. Report PDF freshness                    (skipped if WeasyPrint is absent)
 #
 # Exits non-zero if any executed pass fails. Passes that cannot run on the
 # current host are reported as SKIPPED and do not fail the run.
@@ -50,23 +51,27 @@ else
 fi
 
 # --- 2. Unit tests ----------------------------------------------------------
-banner "2/7  Native unit tests"
+banner "2/8  Native unit tests"
 if bash tools/verify/run_tests.sh; then PASSED+=("tests"); else FAILED+=("tests"); fi
 
-# --- 3. Static analysis -----------------------------------------------------
-banner "3/7  Static analysis"
+# --- 3. DHT22 host simulation ----------------------------------------------
+banner "3/8  DHT22 host simulation"
+if bash tools/verify/dht22_sim/run_dht22_sim.sh; then PASSED+=("dht22-sim"); else FAILED+=("dht22-sim"); fi
+
+# --- 4. Static analysis -----------------------------------------------------
+banner "4/8  Static analysis"
 if bash tools/verify/run_static_analysis.sh; then PASSED+=("static-analysis"); else FAILED+=("static-analysis"); fi
 
 # --- 4. Application-only sizes ---------------------------------------------
-banner "4/7  Application-only size breakdown (clang, indicative)"
+banner "4/8  Application-only size breakdown (clang, indicative)"
 if bash tools/verify/run_size_analysis.sh; then PASSED+=("sizes"); else FAILED+=("sizes"); fi
 
 # --- 5. Configuration consistency ------------------------------------------
-banner "5/7  platformio.ini consistency"
+banner "5/8  platformio.ini consistency"
 if python3 tools/verify/check_config.py; then PASSED+=("config"); else FAILED+=("config"); fi
 
 # --- 6. Wokwi diagram lint --------------------------------------------------
-banner "6/7  Wokwi diagram lint"
+banner "6/8  Wokwi diagram lint"
 if command -v wokwi-cli >/dev/null 2>&1; then
     # --warnings-as-errors matters: without it the CLI exits 0 even when it
     # reports warnings, so a broken diagram would silently pass this check.
@@ -82,7 +87,7 @@ else
 fi
 
 # --- 7. Report PDF freshness ------------------------------------------------
-banner "7/7  Report PDF matches the Markdown"
+banner "7/8  Report PDF matches the Markdown"
 if python3 -c 'import weasyprint, markdown' 2>/dev/null; then
     if python3 tools/generate_report_pdf.py --check; then PASSED+=("pdf"); else FAILED+=("pdf"); fi
 else

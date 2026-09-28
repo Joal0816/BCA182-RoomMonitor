@@ -6,6 +6,7 @@ the three reproducible results quoted in the laboratory report:
 | Claim | Where quoted | Reproducible? |
 |---|---|---|
 | 33 native unit tests pass | report §5.1, README | **Yes** — `run_tests.sh` |
+| DHT22 frame decode, checksum rejection and timeout behaviour | — | **Yes** — `dht22_sim/run_dht22_sim.sh` |
 | Static analysis: 2 benign MMIO findings, 21 advisories, 1 warning | report §6, `docs/static-analysis.md` | **Yes** — `run_static_analysis.sh` |
 | Firmware size / RAM use | report §7.1 | **Approximately** — `run_size_analysis.sh` |
 | `platformio.ini` is consistent with `lib/` | — | **Yes** — `check_config.py` |
@@ -90,12 +91,35 @@ invisible to these passes. Same for `shim/`, which supplies `stdint.h`,
 `string.h` and a small Unity-compatible test runner so the `test/` sources
 compile without a system libc.
 
+## Why the DHT22 host simulation exists
+
+Unlike the modules under `src/app/logic/`, the DHT22 driver is not
+hardware-independent: it polls `GPIO_TypeDef.IDR` directly and measures every
+pulse with `DWT->CYCCNT`. `dht22_sim/` compiles the real driver
+(`src/app/hal/dht22.c`) unmodified against a host model of the sensor, so the
+frame decode, the checksum check and the timeout paths can be exercised without
+a board or Wokwi. It is what pins down the driver's own claim that it releases
+the line to the internal pull-up rather than leaving it floating.
+
+The injection is contained in `dht22_sim_prefix.h`, which gcc `-include`s into
+that one translation unit. It replaces the `DWT` the stub header declares with a
+macro that advances a *virtual* microsecond clock on every access, and points
+`CoreDebug` at simulator memory so `DHT22_Init()` does not write to
+`0xE000EDF0`. The data line is then a pure function of the clock, so the model is
+deterministic and never depends on host timing.
+
+**Coverage limit:** the model is faithful to the cycle-counter branch, which is
+the branch the firmware takes on real silicon. The no-DWT fallback in
+`DHT22_CaptureFrame` — the sample-past-30 us path — is not exercised, because it
+makes no forward progress without the counter the model drives.
+
 ## Usage
 
 ```bash
 ./tools/verify/run_all.sh              # every pass below, in one command
 
 ./tools/verify/run_tests.sh            # 33 native unit tests
+./tools/verify/dht22_sim/run_dht22_sim.sh  # 14 DHT22 driver tests against a host sensor model
 ./tools/verify/run_static_analysis.sh  # clang --analyze, clang-tidy, -Wall -Wextra
 ./tools/verify/run_size_analysis.sh    # ARM object sizes + linked ELF estimate
 python3 tools/verify/check_config.py   # platformio.ini vs. the contents of lib/
