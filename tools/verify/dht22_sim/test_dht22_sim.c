@@ -186,6 +186,23 @@ void test_read_decodes_when_counter_rate_disagrees_with_system_clock(void) {
     TEST_ASSERT_EQUAL(24.0f, DHT22_GetTemperature(&dht));
 }
 
+/* SystemCoreClock stays 0 until SystemCoreClockUpdate() has run.  A zero
+ * nominal scale would make the handshake budget zero, so every read would time
+ * out before the sensor had answered; the scale is floored to the slowest
+ * plausible counter and the reply still calibrates the decode. */
+void test_read_decodes_before_system_clock_is_known(void) {
+    uint8_t d[5];
+    make_frame(d, 650U, 0, 240U); /* 65.0 %RH, 24.0 C */
+    sim_load_bytes(d);
+
+    SystemCoreClock = 0U;               /* SystemCoreClockUpdate() not run yet */
+    sim_set_counter_cycles_per_us(72U); /* the counter still ticks at 72 MHz */
+
+    TEST_ASSERT_EQUAL(DHT22_OK, DHT22_Read(&dht));
+    TEST_ASSERT_EQUAL(65.0f, DHT22_GetHumidity(&dht));
+    TEST_ASSERT_EQUAL(24.0f, DHT22_GetTemperature(&dht));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_read_decodes_temperature_and_humidity);
@@ -203,5 +220,6 @@ int main(void) {
     RUN_TEST(test_read_is_repeatable);
     RUN_TEST(test_read_recovers_after_timeout);
     RUN_TEST(test_read_decodes_when_counter_rate_disagrees_with_system_clock);
+    RUN_TEST(test_read_decodes_before_system_clock_is_known);
     return UNITY_END();
 }

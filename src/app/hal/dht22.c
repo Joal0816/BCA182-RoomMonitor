@@ -237,11 +237,13 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint8_t measure = DHT22_CycleCounterReady();
     /* Nominal scale, replaced below by one measured from the reply itself.  If
        SystemCoreClockUpdate() has not run then SystemCoreClock is still 0, and a
-       zero scale would make every handshake budget zero and time out at once,
-       so floor it before it is used. */
+       zero scale would make every handshake budget zero and time out at once.
+       Floor it to the slowest plausible counter instead: the handshake still
+       runs before the scale can be measured, so a floor that is too small would
+       leave its budget shorter than the sensor's 80 us response. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
-    if (cycles_per_us == 0U) {
-        cycles_per_us = 1U;
+    if (cycles_per_us < DHT22_MIN_CYCLES_PER_US) {
+        cycles_per_us = DHT22_MIN_CYCLES_PER_US;
     }
     /* The handshake runs before the reply can be timed, so it uses the nominal
        scale; the bit loop replaces this with the measured one before it
