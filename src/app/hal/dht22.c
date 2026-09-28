@@ -18,12 +18,13 @@
 #define DHT22_START_LOW_MS 2U
 
 /* Timeout bound for the handshake levels, in microseconds.  This is a bound, not
-   an expected value, so it is deliberately generous: it must still outlast the
-   80 us response pulses even when SystemCoreClock understates the counter's real
-   rate -- the case on a simulator whose core runs at the board's nominal clock
-   regardless of the RCC prescalers the firmware programmed.  DHT22_BOUND_CYCLES
-   converts it with the fastest plausible rate rather than with SystemCoreClock,
-   so the bound stays generous whatever the firmware believes its clock is. */
+   an expected value, so it is deliberately generous: the handshake runs before
+   the reply has been timed, so it has to be converted with the firmware's own
+   idea of the clock, and it must still outlast the 80 us response pulses when
+   that idea understates the counter's real rate -- the case on a simulator whose
+   core runs at the board's nominal clock regardless of the RCC prescalers the
+   firmware programmed.  The worst such case is a nominal 8 MHz against a 72 MHz
+   counter, where 1000 * 8 / 72 leaves 111 us, still above 80 us. */
 #define DHT22_EDGE_US 1000U
 
 /* Width of the sensor's response high pulse.  It is a fixed part of the
@@ -35,25 +36,21 @@
    is the 70 us high pulse; the margin keeps the worst case -- a sensor that
    stalls mid-frame while SysTick is masked -- short.  It is tighter than the
    handshake bound because the bit loop runs 40 times and so dominates that
-   window. */
+   window, and it is converted with the rate measured from the reply rather than
+   with SystemCoreClock, so it stays that many real microseconds however wrong
+   the firmware's idea of the clock is. */
 #define DHT22_BIT_EDGE_US 200U
 
-/* Plausible range for the measured scale, in counter cycles per microsecond.
-   A single glitch-stretched response pulse would otherwise inflate the scale
-   and bias every bit towards "0", so a measurement outside this range is
-   discarded and the nominal scale kept -- which only affects the decode, because
-   the wait bounds below never use the measured scale.  8 covers the slowest
-   STM32F1 setting (HSI 8 MHz); 144 covers the fastest plausible core. */
+/* Plausible range for the measured scale, in counter cycles per microsecond.  A
+   single glitch-stretched response pulse would otherwise inflate the scale and
+   bias every bit towards "0", so the measurement is clamped into this range
+   before it is used -- for the decode and for the wait bounds alike, because a
+   bound tolerates exactly the over-estimate that the clamp allows.  8 covers the
+   slowest STM32F1 setting (HSI 8 MHz); 144 covers the fastest plausible core.
+   Only a counter above about 400 cycles/us would shorten DHT22_BIT_EDGE_US below
+   the 70 us bit pulse, and no STM32F1 core runs anywhere near that. */
 #define DHT22_MIN_CYCLES_PER_US 8U
 #define DHT22_MAX_CYCLES_PER_US 144U
-
-/* A wait bound in counter cycles: `us` microseconds at the fastest counter the
-   driver considers plausible.  Bounds are deliberately generous -- an
-   over-estimate costs time only when the sensor is silent, whereas an
-   under-estimate ends a wait the sensor was still about to satisfy -- so they
-   are derived from the fastest plausible rate rather than from the measured
-   scale or from SystemCoreClock, either of which can be wrong. */
-#define DHT22_BOUND_CYCLES(us) ((us) * DHT22_MAX_CYCLES_PER_US)
 
 /* A data bit is a 26-28 us high pulse for "0" and 70 us for "1".  Measuring the
    high pulse and comparing it against the midpoint (48 us) does not depend on
@@ -120,10 +117,10 @@ static inline uint8_t DHT22_IsHigh(const DHT22_t *dht) {
 
 static uint32_t DHT22_UsToCycles(uint32_t us) {
     /* SystemCoreClock is 0 until SystemCoreClockUpdate() has run, and a zero
-       result would turn DHT22_Delay_us() into a no-op.  Fall back to the
-       slowest plausible rate instead: the delay then runs long rather than not
-       at all, which is the safe direction for a delay whose only job is to let
-       the line settle before it is sampled. */
+       result would turn DHT22_Delay_us() into a no-op.  The floor keeps the
+       delay non-zero; it cannot make it accurate, because this path only runs
+       when the cycle counter is unusable and SystemCoreClock may itself be
+       stale.  The caller treats the result as best-effort settling, not timing. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
     if (cycles_per_us < DHT22_MIN_CYCLES_PER_US) {
         cycles_per_us = DHT22_MIN_CYCLES_PER_US;
@@ -255,15 +252,17 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
    vTaskDelay before entering it rather than by a busy-wait inside. */
 static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint8_t measure = DHT22_CycleCounterReady();
-    /* Decode scale, in counter cycles per microsecond: the nominal one until the
-       reply can be measured, so that a reply which never yields a usable
-       measurement still has something to divide by.  Floored because
-       SystemCoreClock is 0 until SystemCoreClockUpdate() has run. */
+    /* Counter cycles per microsecond: the firmware's own idea of it until the
+       reply can be measured, floored because SystemCoreClock is 0 until
+       SystemCoreClockUpdate() has run.  Everything that needs a microsecond
+       budget converts it with this, so the handshake is generous whenever the
+       firmware's idea is low and the bit loop becomes exact as soon as the reply
+       has replaced it with the measured rate. */
     uint32_t cycles_per_us = SystemCoreClock / 1000000U;
     if (cycles_per_us < DHT22_MIN_CYCLES_PER_US) {
         cycles_per_us = DHT22_MIN_CYCLES_PER_US;
     }
-    uint32_t wait_budget = DHT22_BOUND_CYCLES(DHT22_EDGE_US);
+    uint32_t wait_budget = DHT22_EDGE_US * cycles_per_us;
 
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
@@ -289,18 +288,23 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
-        uint32_t response_cycles = DWT->CYCCNT - rise;
-        uint32_t measured = response_cycles / DHT22_RESPONSE_HIGH_US;
-        if (measured >= DHT22_MIN_CYCLES_PER_US &&
-            measured <= DHT22_MAX_CYCLES_PER_US) {
-            cycles_per_us = measured;
-        }
+        uint32_t measured = (DWT->CYCCNT - rise) / DHT22_RESPONSE_HIGH_US;
+        /* Clamp rather than discard: a stretched response over-estimates the
+           rate, which biases the decode but only ever makes a bound more
+           generous, and clamping leaves the driver with a scale instead of with
+           none.  Anything the clamp rejects decodes to a bad checksum, which the
+           caller sees as DHT22_ERROR rather than as silent nonsense. */
+        cycles_per_us = measured < DHT22_MIN_CYCLES_PER_US ? DHT22_MIN_CYCLES_PER_US
+                      : (measured > DHT22_MAX_CYCLES_PER_US ? DHT22_MAX_CYCLES_PER_US
+                                                            : measured);
     } else if (!DHT22_WaitLow(dht, &wait_budget)) {
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
 
-    wait_budget = DHT22_BOUND_CYCLES(DHT22_BIT_EDGE_US);
+    /* The reply has replaced the scale with a measured one, so this bound is now
+       that many real microseconds. */
+    wait_budget = DHT22_BIT_EDGE_US * cycles_per_us;
 
     for (int i = 0; i < 40; i++) {
         /* Rising edge: end of the 50 us low pulse that opens every bit. */
