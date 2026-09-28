@@ -113,7 +113,7 @@ Resolution: Accepted. Priority scheme is appropriate for the fixed functionality
 
 **Original Issue:** After a successful build, a Wokwi run produced exactly two lines of serial output — `[MAIN] System initialized` and `[MAIN] Starting FreeRTOS scheduler` — and then nothing at all. No task banner, no `[SENSOR]` line, no OLED content, no LED activity. Both lines that appeared are printed from `main()` *before* `vTaskStartScheduler()` is called, so the boundary between working and silent output fell exactly at the scheduler start.
 
-**Root Cause:** The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` clears the interrupt masks and then issues the supervisor call that starts the first task:
+**Leading hypothesis:** The FreeRTOS Cortex-M3 port's `prvPortStartFirstTask()` clears the interrupt masks and then issues the supervisor call that starts the first task:
 
 ```asm
 cpsie i          ; clear PRIMASK  -- enable interrupts
