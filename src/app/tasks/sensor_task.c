@@ -40,6 +40,18 @@ void SensorTask(void *pvParameters) {
             UART_Mutex_Printf(params->uart_mutex,
                              "[SENSOR] DHT22 read error (status=%u)\r\n",
                              (unsigned)dht_status);
+            /* TEMPORARY DIAGNOSTIC -- remove before committing.  idle/released
+               are the line levels either side of the start pulse, stage is the
+               handshake wait that expired (1 = response low, 2 = response high,
+               3 = first bit), final is the level it gave up on, dwt is whether
+               the cycle-counter path was taken. */
+            UART_Mutex_Printf(params->uart_mutex,
+                             "[DHTDIAG] idle=%u released=%u stage=%u final=%u dwt=%u\r\n",
+                             (unsigned)DHT22_DiagIdle,
+                             (unsigned)DHT22_DiagReleased,
+                             (unsigned)DHT22_DiagStage,
+                             (unsigned)DHT22_DiagFinal,
+                             (unsigned)DHT22_DiagDwt);
         }
 
         if (LDR_Read(params->ldr) == LDR_OK) {

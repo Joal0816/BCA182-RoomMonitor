@@ -35,4 +35,11 @@ uint8_t DHT22_Read(DHT22_t *dht);
 float DHT22_GetTemperature(const DHT22_t *dht);
 float DHT22_GetHumidity(const DHT22_t *dht);
 
+/* TEMPORARY DIAGNOSTIC -- remove before committing.  Defined in dht22.c. */
+extern volatile uint8_t DHT22_DiagIdle;
+extern volatile uint8_t DHT22_DiagReleased;
+extern volatile uint8_t DHT22_DiagStage;
+extern volatile uint8_t DHT22_DiagFinal;
+extern volatile uint8_t DHT22_DiagDwt;
+
 #endif /* DHT22_H */

@@ -72,6 +72,17 @@
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
 
+/* TEMPORARY DIAGNOSTIC -- remove before committing.  Every read fails with
+   DHT22_TIMEOUT, which does not say which of the three handshake waits expired
+   nor what the line was doing when it did.  These record the two levels that
+   separate "the line never rises" from "the sensor never answers", the wait that
+   failed, and whether the DWT path was taken at all. */
+volatile uint8_t DHT22_DiagIdle;     /* IDR before the start pulse */
+volatile uint8_t DHT22_DiagReleased; /* IDR straight after DHT22_Release */
+volatile uint8_t DHT22_DiagStage;    /* 0 = handshake passed, else the wait that failed */
+volatile uint8_t DHT22_DiagFinal;    /* IDR when that wait gave up */
+volatile uint8_t DHT22_DiagDwt;      /* DHT22_CycleCounterReady() verdict */
+
 static uint32_t DHT22_PinIndex(uint16_t pin) {
     uint32_t index = 0;
     while (index < DHT22_PIN_COUNT && (pin & (1UL << index)) == 0U) {
@@ -279,12 +290,31 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint32_t bound_scale = nominal_scale;
     uint32_t wait_budget = DHT22_EDGE_US * bound_scale;
 
+    DHT22_DiagDwt = measure;
+    DHT22_DiagIdle = DHT22_IsHigh(dht);
+
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
 
     taskENTER_CRITICAL();
 
     DHT22_Release(dht);
+    DHT22_DiagReleased = DHT22_IsHigh(dht);
+    DHT22_DiagStage = 0;
+    DHT22_DiagFinal = 0;
+
+    /* The line idles high once the host lets go of it; the sensor answers 20-40
+       us later with its 80 us low.  Waiting for that idle high first is what
+       keeps a release that has not taken effect yet -- the line still low from
+       the start pulse -- from being mistaken for the reply.  Without it the
+       response-low wait returns immediately, every later level is then read one
+       edge early, and the frame runs off its end and times out. */
+    if (!DHT22_WaitHigh(dht, &wait_budget)) {
+        DHT22_DiagStage = 4;
+        DHT22_DiagFinal = DHT22_IsHigh(dht);
+        taskEXIT_CRITICAL();
+        return DHT22_TIMEOUT;
+    }
 
     /* Response signal: the sensor pulls the line low for 80 us, high for 80 us,
        then opens the first bit with a 50 us low pulse.  The 80 us high pulse is
@@ -292,7 +322,15 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        turns the counter's own ticks into microseconds.  Deriving the scale from
        the counter, rather than trusting SystemCoreClock, is what keeps the bit
        decode correct when the two do not agree. */
-    if (!DHT22_WaitLow(dht, &wait_budget) || !DHT22_WaitHigh(dht, &wait_budget)) {
+    if (!DHT22_WaitLow(dht, &wait_budget)) {
+        DHT22_DiagStage = 1;
+        DHT22_DiagFinal = DHT22_IsHigh(dht);
+        taskEXIT_CRITICAL();
+        return DHT22_TIMEOUT;
+    }
+    if (!DHT22_WaitHigh(dht, &wait_budget)) {
+        DHT22_DiagStage = 2;
+        DHT22_DiagFinal = DHT22_IsHigh(dht);
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
@@ -300,6 +338,8 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     if (measure) {
         uint32_t rise = DWT->CYCCNT;
         if (!DHT22_WaitLow(dht, &wait_budget)) {
+            DHT22_DiagStage = 3;
+            DHT22_DiagFinal = DHT22_IsHigh(dht);
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
@@ -318,6 +358,8 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             bound_scale = cycles_per_us;
         }
     } else if (!DHT22_WaitLow(dht, &wait_budget)) {
+        DHT22_DiagStage = 3;
+        DHT22_DiagFinal = DHT22_IsHigh(dht);
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }

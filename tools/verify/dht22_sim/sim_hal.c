@@ -25,6 +25,13 @@ static uint32_t g_counter_cycles_per_us = 72U;
 #define DHT22_SIM_RESPONSE_HIGH_US 80U
 #define DHT22_SIM_BIT_LOW_US       50U
 
+/* How long the line stays high after the host releases it, before the sensor
+ * answers.  The datasheet gives 20-40 us and the driver waits for that idle
+ * high, so modelling it is what lets a test tell the release apart from the
+ * reply.  Without this window the frame starts at the response low and the
+ * driver's release cannot be observed at all. */
+#define DHT22_SIM_IDLE_HIGH_US     30U
+
 /* The response high pulse is the one the driver times to learn its scale, so a
  * test can stretch or shorten it to drive the driver's plausibility clamp. */
 static uint16_t g_response_high_us = DHT22_SIM_RESPONSE_HIGH_US;
@@ -36,6 +43,11 @@ static uint8_t dht22_sim_level(uint32_t t) {
     if (g_mode == DHT22_SIM_STUCK_LOW) {
         return 0U;
     }
+
+    if (t < DHT22_SIM_IDLE_HIGH_US) {
+        return 1U;
+    }
+    t -= DHT22_SIM_IDLE_HIGH_US;
 
     if (t < DHT22_SIM_RESPONSE_LOW_US) {
         return 0U;

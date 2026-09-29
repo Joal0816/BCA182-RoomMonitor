@@ -24,6 +24,15 @@
       }
     },
     {
+      "type": "wokwi-resistor",
+      "id": "dht22_pullup",
+      "top": -180,
+      "left": -150,
+      "attrs": {
+        "value": "4700"
+      }
+    },
+    {
       "type": "wokwi-photoresistor-sensor",
       "id": "ldr",
       "top": -180,
@@ -111,6 +120,18 @@
       [
         "v-20"
       ]
+    ],
+    [
+      "dht22:SDA",
+      "dht22_pullup:1",
+      "green",
+      []
+    ],
+    [
+      "dht22_pullup:2",
+      "mcu:3V3.1",
+      "red",
+      []
     ],
     [
       "mcu:3V3.1",
