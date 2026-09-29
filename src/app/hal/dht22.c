@@ -73,14 +73,21 @@
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
 
 /* TEMPORARY DIAGNOSTIC -- remove before committing.  Every read fails with
-   DHT22_TIMEOUT, which does not say which of the three handshake waits expired
-   nor what the line was doing when it did.  These record the two levels that
-   separate "the line never rises" from "the sensor never answers", the wait that
-   failed, and whether the DWT path was taken at all. */
+   DHT22_TIMEOUT, which does not say which wait expired nor what the line was
+   doing when it did.  These record the two levels that separate "the line never
+   rises" from "the sensor never answers", the wait that failed, and whether the
+   DWT path was taken at all.
+
+   Stage: 0 = handshake passed, 1 = response low, 2 = response high, 3 = first
+   bit, 4 = the line never returned to idle high, 5 = a bit's rising edge,
+   6 = a bit's falling edge.  The bit loop sets a stage too: without that, a
+   frame that dies part-way through would print stage 0 and look exactly like a
+   handshake that passed. */
 volatile uint8_t DHT22_DiagIdle;     /* IDR before the start pulse */
 volatile uint8_t DHT22_DiagReleased; /* IDR straight after DHT22_Release */
 volatile uint8_t DHT22_DiagStage;    /* 0 = handshake passed, else the wait that failed */
 volatile uint8_t DHT22_DiagFinal;    /* IDR when that wait gave up */
+volatile uint8_t DHT22_DiagBit;      /* bit index when stage is 5 or 6 */
 volatile uint8_t DHT22_DiagDwt;      /* DHT22_CycleCounterReady() verdict */
 
 static uint32_t DHT22_PinIndex(uint16_t pin) {
@@ -374,6 +381,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     for (int i = 0; i < 40; i++) {
         /* Rising edge: end of the 50 us low pulse that opens every bit. */
         if (!DHT22_WaitHigh(dht, &wait_budget)) {
+            DHT22_DiagStage = 5;
+            DHT22_DiagBit = (uint8_t)i;
+            DHT22_DiagFinal = DHT22_IsHigh(dht);
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
@@ -381,6 +391,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         if (measure) {
             uint32_t rise = DWT->CYCCNT;
             if (!DHT22_WaitLow(dht, &wait_budget)) {
+                DHT22_DiagStage = 6;
+                DHT22_DiagBit = (uint8_t)i;
+                DHT22_DiagFinal = DHT22_IsHigh(dht);
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
@@ -392,6 +405,9 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             DHT22_Delay_us(30);
             high_us[i] = DHT22_IsHigh(dht) ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
             if (!DHT22_WaitLow(dht, &wait_budget)) {
+                DHT22_DiagStage = 6;
+                DHT22_DiagBit = (uint8_t)i;
+                DHT22_DiagFinal = DHT22_IsHigh(dht);
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
