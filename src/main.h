@@ -48,7 +48,7 @@ typedef enum {
 #define INACTIVE_TIMEOUT_MS   15000U
 #define SENSOR_READ_PERIOD_MS 1000U
 #define ALARM_CHECK_PERIOD_MS 500U
-#define DISPLAY_REFRESH_MS    100U
+#define DISPLAY_REFRESH_MS    250U
 
 void Error_Handler(void);
 

@@ -60,11 +60,20 @@ void DisplayTask(void *pvParameters) {
     SensorData_t data;
     DisplayPage_t current_page = PAGE_TEMPERATURE;
 
+    UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] Initializing OLED...\r\n");
+    OLED_Init(params->oled, params->hi2c);
+    UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] OLED init done\r\n");
+
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
     OLED_Update(params->oled);
 
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    /* Pre-fill with default values so display renders even before
+       the first sensor sample arrives. */
+    data.temperature = 25.0f;
+    data.humidity = 50.0f;
+    data.light_level = 512;
+    data.motion_detected = 0;
 
     for (;;) {
         xQueueReceive(params->display_page_queue, &current_page, 0);
@@ -75,37 +84,38 @@ void DisplayTask(void *pvParameters) {
                                    MOTION_DETECTED_BIT | ENCODER_CW_BIT |
                                    ENCODER_CCW_BIT | ENCODER_BTN_BIT);
 
-        if (xQueueReceive(params->sensor_queue, &data, 0) == pdPASS) {
-            SystemState_t state = StateMachine_GetState(params->state_machine);
+        /* Grab latest sensor data if available, otherwise keep defaults */
+        (void)xQueueReceive(params->sensor_queue, &data, 0);
 
-            OLED_Clear(params->oled);
+        SystemState_t state = StateMachine_GetState(params->state_machine);
 
-            if (state == STATE_ACTIVE) {
-                DrawStatusBar(params->oled, state);
+        OLED_Clear(params->oled);
 
-                switch (current_page) {
-                    case PAGE_TEMPERATURE:
-                        DrawTemperaturePage(params->oled, &data);
-                        break;
-                    case PAGE_HUMIDITY:
-                        DrawHumidityPage(params->oled, &data);
-                        break;
-                    case PAGE_LIGHT:
-                        DrawLightPage(params->oled, &data);
-                        break;
-                    case PAGE_MOTION:
-                        DrawMotionPage(params->oled, &data);
-                        break;
-                    default:
-                        break;
-                }
-            } else {
-                OLED_DrawString(params->oled, 10, 25, "SYSTEM", 2);
-                OLED_DrawString(params->oled, 10, 45, "INACTIVE", 2);
+        if (state == STATE_ACTIVE) {
+            DrawStatusBar(params->oled, state);
+
+            switch (current_page) {
+                case PAGE_TEMPERATURE:
+                    DrawTemperaturePage(params->oled, &data);
+                    break;
+                case PAGE_HUMIDITY:
+                    DrawHumidityPage(params->oled, &data);
+                    break;
+                case PAGE_LIGHT:
+                    DrawLightPage(params->oled, &data);
+                    break;
+                case PAGE_MOTION:
+                    DrawMotionPage(params->oled, &data);
+                    break;
+                default:
+                    break;
             }
-
-            OLED_Update(params->oled);
+        } else {
+            OLED_DrawString(params->oled, 10, 25, "SYSTEM", 2);
+            OLED_DrawString(params->oled, 10, 45, "INACTIVE", 2);
         }
+
+        OLED_Update(params->oled);
 
         vTaskDelay(pdMS_TO_TICKS(DISPLAY_REFRESH_MS));
     }

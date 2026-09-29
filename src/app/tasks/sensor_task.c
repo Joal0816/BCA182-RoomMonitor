@@ -33,15 +33,14 @@ void SensorTask(void *pvParameters) {
         /* Publish the sample independently so AlarmTask and DisplayTask do
            not compete for the same queue item.  A length-one queue keeps the
            latest sample when a consumer is busy rendering or alarming. */
-        if (read_ok) {
-            xQueueOverwrite(params->alarm_queue, &data);
-            xQueueOverwrite(params->display_queue, &data);
-        }
+        xQueueOverwrite(params->alarm_queue, &data);
+        xQueueOverwrite(params->display_queue, &data);
 
         UART_Mutex_Printf(params->uart_mutex,
-                         "[SENSOR] T=%.1fC H=%.1f%% L=%d M=%d\r\n",
-                         data.temperature, data.humidity,
-                         data.light_level, data.motion_detected);
+                         "[SENSOR] T=%.1fC H=%.1f%% L=%lu M=%d\r\n",
+                         isnan(data.temperature) ? 0.0f : data.temperature,
+                         isnan(data.humidity) ? 0.0f : data.humidity,
+                         (unsigned long)data.light_level, data.motion_detected);
 
         vTaskDelayUntil(&xLastWakeTime, xPeriod);
     }

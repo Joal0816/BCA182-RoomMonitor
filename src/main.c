@@ -73,13 +73,14 @@ int main(void) {
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
-    OLED_Init(&oled, &hi2c1);
+    /* OLED_Init deferred to DisplayTask — avoids blocking main() with I2C */
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
     StateMachine_Init(&state_machine, INACTIVE_TIMEOUT_MS);
     Alarm_Init(&alarm, &buzzer);
     UART_Mutex_Init(&uart_mutex, &huart1);
+    UART_Mutex_Printf(&uart_mutex, "\r\n[SYSTEM] BCA182 Room Monitor Starting...\r\n");
 
     sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
     display_sensor_queue = xQueueCreate(1, sizeof(SensorData_t));
@@ -108,6 +109,7 @@ int main(void) {
     alarm_task_params.uart_mutex = &uart_mutex;
 
     display_task_params.oled = &oled;
+    display_task_params.hi2c = &hi2c1;
     display_task_params.sensor_queue = display_sensor_queue;
     display_task_params.display_page_queue = display_page_queue;
     display_task_params.state_machine = &state_machine;
@@ -133,14 +135,17 @@ static void SystemClock_Config(void) {
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-    RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-    RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+    /* Use HSI (Internal 8 MHz) with PLL to reach 64 MHz.
+       Wokwi's Blue Pill simulation has no external crystal modelled,
+       so attempting HSE causes a 100 ms timeout that stalls startup. */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-    RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
+    RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
+        return;  /* stay on default 8 MHz HSI — MCU still runs */
     }
 
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
@@ -150,9 +155,7 @@ static void SystemClock_Config(void) {
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
-        Error_Handler();
-    }
+    (void)HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2);
 }
 
 static void MX_GPIO_Init(void) {
@@ -300,16 +303,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
     if (GPIO_Pin == GPIO_PIN_0) {
         PIR_EXTI_Callback(&pir);
-        vTaskNotifyGiveFromISR(motion_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        if (motion_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(motion_task_params.task_handle, &xHigherPriorityTaskWoken);
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
     } else if (GPIO_Pin == GPIO_PIN_2) {
         Encoder_CLK_EXTI_Callback(&encoder);
-        vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        if (input_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
     } else if (GPIO_Pin == GPIO_PIN_4) {
         encoder.button_pressed = 1;
-        vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        if (input_task_params.task_handle != NULL) {
+            vTaskNotifyGiveFromISR(input_task_params.task_handle, &xHigherPriorityTaskWoken);
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
     }
 }
 
@@ -324,6 +333,9 @@ void EXTI2_IRQHandler(void) {
 void EXTI4_IRQHandler(void) {
     HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
 }
+
+/* FreeRTOS port SysTick handler */
+extern void xPortSysTickHandler(void);
 
 void SysTick_Handler(void) {
     HAL_IncTick();

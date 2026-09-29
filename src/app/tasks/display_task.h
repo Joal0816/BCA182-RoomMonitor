@@ -9,6 +9,7 @@
 
 typedef struct {
     OLED_t *oled;
+    I2C_HandleTypeDef *hi2c;
     QueueHandle_t sensor_queue;
     QueueHandle_t display_page_queue;
     EventGroupHandle_t event_group;

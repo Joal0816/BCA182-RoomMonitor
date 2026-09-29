@@ -3,7 +3,7 @@
 
 static void OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
-    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, HAL_MAX_DELAY);
+    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2, 50);
 }
 
 static void OLED_SendData(OLED_t *oled, uint8_t data) {
@@ -13,33 +13,17 @@ static void OLED_SendData(OLED_t *oled, uint8_t data) {
 
 void OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     oled->hi2c = hi2c;
-    HAL_Delay(100);
 
-    OLED_SendCommand(oled, 0xAE);
-    OLED_SendCommand(oled, 0xD5);
-    OLED_SendCommand(oled, 0x80);
-    OLED_SendCommand(oled, 0xA8);
-    OLED_SendCommand(oled, 0x3F);
-    OLED_SendCommand(oled, 0xD3);
-    OLED_SendCommand(oled, 0x00);
-    OLED_SendCommand(oled, 0x40);
-    OLED_SendCommand(oled, 0x8D);
-    OLED_SendCommand(oled, 0x14);
-    OLED_SendCommand(oled, 0x20);
-    OLED_SendCommand(oled, 0x00);
-    OLED_SendCommand(oled, 0xA1);
-    OLED_SendCommand(oled, 0xC8);
-    OLED_SendCommand(oled, 0xDA);
-    OLED_SendCommand(oled, 0x12);
-    OLED_SendCommand(oled, 0x81);
-    OLED_SendCommand(oled, 0xCF);
-    OLED_SendCommand(oled, 0xD9);
-    OLED_SendCommand(oled, 0xF1);
-    OLED_SendCommand(oled, 0xDB);
-    OLED_SendCommand(oled, 0x40);
-    OLED_SendCommand(oled, 0xA4);
-    OLED_SendCommand(oled, 0xA6);
-    OLED_SendCommand(oled, 0xAF);
+    static const uint8_t init_cmds[] = {
+        0x00, /* Co = 0, D/C# = 0 (command stream) */
+        0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
+        0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
+        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6,
+        0xAF
+    };
+
+    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                             (uint8_t *)init_cmds, sizeof(init_cmds), 50);
 
     OLED_Clear(oled);
     OLED_Update(oled);
@@ -52,25 +36,25 @@ void OLED_Clear(OLED_t *oled) {
 }
 
 void OLED_Update(OLED_t *oled) {
-    /* Set column and page address window to full screen */
-    OLED_SendCommand(oled, 0x21);
-    OLED_SendCommand(oled, 0);
-    OLED_SendCommand(oled, OLED_WIDTH - 1);
-    OLED_SendCommand(oled, 0x22);
-    OLED_SendCommand(oled, 0);
-    OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1);
+    /* Set column and page address window to full screen in single command transaction */
+    static const uint8_t win_cmds[] = {
+        0x00,
+        0x21, 0, OLED_WIDTH - 1,
+        0x22, 0, (OLED_HEIGHT / 8) - 1
+    };
+    HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                             (uint8_t *)win_cmds, sizeof(win_cmds), 50);
 
     /* Send entire frame buffer in ONE I2C transaction:
      * [0x40][pixel0][pixel1]...[pixel1023]
-     * This avoids 1024 separate I2C transactions which is far too slow
-     * and causes Wokwi's I2C simulation to time out. */
+     * 1025 bytes at 100 kHz I2C ≈ 92 ms, so use a200 ms timeout. */
     static uint8_t tx_buf[1 + OLED_WIDTH * OLED_HEIGHT / 8];
     tx_buf[0] = 0x40; /* Co=0, D/C#=1 — data stream */
     for (int i = 0; i < (int)sizeof(oled->buffer); i++) {
         tx_buf[1 + i] = oled->buffer[i];
     }
     HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
-                             tx_buf, sizeof(tx_buf), HAL_MAX_DELAY);
+                             tx_buf, sizeof(tx_buf), 200);
 }
 
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color) {
