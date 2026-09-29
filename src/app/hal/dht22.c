@@ -61,11 +61,12 @@
 
 /* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
 #define DHT22_CNF_INPUT_FLOAT 0x4U /* input, floating (high-Z) */
-/* Open-drain, not push-pull.  Wokwi's DHT22 model drives the data line itself
-   while it answers, so a push-pull low from the MCU would leave two drivers
-   fighting over one wire during the reply.  An open-drain low only sinks, which
-   resolves to a clean low. */
-#define DHT22_CNF_OUT_OD_2MHZ 0x6U /* output open-drain, 2 MHz */
+/* Push-pull, not open-drain.  Wokwi's STM32 single-wire drivers only ever
+   switch between a push-pull output and a high-Z input, and the simulator's
+   handling of open-drain output is not something to depend on; the start pulse
+   only needs to sink the line, which a push-pull low does directly.  The reply
+   is unaffected either way, because the sensor model drives both of its levels. */
+#define DHT22_CNF_OUT_PP_2MHZ 0x2U /* output push-pull, 2 MHz */
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
 
@@ -122,19 +123,31 @@ static void DHT22_SetConfig(DHT22_t *dht, uint32_t config) {
 
 static void DHT22_DriveLow(DHT22_t *dht) {
     dht->port->BRR = dht->pin;
-    DHT22_SetConfig(dht, DHT22_CNF_OUT_OD_2MHZ);
+    DHT22_SetConfig(dht, DHT22_CNF_OUT_PP_2MHZ);
 }
 
 /* Release the line to a true high-Z input, not to the internal pull-up.
-   Wokwi's STM32 does not model the internal pull-up as a weak bias on the net,
-   so selecting input with pull-up (CNF = 10) leaves the pin asserting a level of
-   its own instead of handing the wire to the sensor: the sensor's low pulses are
-   masked, it never looks like it replied, and every read times out with status
-   2.  A floating input lets the sensor own the bus, and the discrete 4.7 kOhm
-   pull-up on dht22:SDA in diagram.json supplies the idle high that the sensor's
-   open-drain release and the MCU's own waits both need.  This is also what the
-   driver did before the register rewrite (HAL_GPIO_Init, GPIO_MODE_INPUT +
-   GPIO_NOPULL), which is the configuration the report's WF-01 row records. */
+   Wokwi's DHT22 model only answers once it sees the line come back HIGH: it
+   triggers on the rising edge that ends the start pulse, not on the length of
+   the pulse itself, so that edge is the one thing the release must produce.
+
+   The order here is load-bearing.  BSRR is written while the pin is still a
+   push-pull output, so the MCU drives the line high for the few cycles before
+   the configuration write floats it, and that transition is the edge the sensor
+   model watches for.  Floating first and only then setting ODR -- the textbook
+   order, and what this comment used to imply -- would leave the edge to the
+   external pull-up alone.
+
+   The pull-up still matters, and not only in the simulator.  The line is high-Z
+   after the release, so the discrete 4.7 kOhm resistor on dht22:SDA in
+   diagram.json sustains the idle high, and on real hardware it is what supplies
+   the highs of the reply, which a physical DHT22 only ever pulls low.  The
+   simulator's DHT22 model drives both levels itself, so there the reply needs no
+   bias -- but the resistor is not there for the simulator.
+
+   Selecting input with pull-up (CNF = 10) is what the register rewrite did, and
+   the simulator does not provide that as a reliable bias, so the line had
+   nothing to raise it and no edge ever reached the model. */
 static void DHT22_Release(DHT22_t *dht) {
     dht->port->BSRR = dht->pin; /* ODR = 1: drive high, should the pin be driven */
     DHT22_SetConfig(dht, DHT22_CNF_INPUT_FLOAT);
