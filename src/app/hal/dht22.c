@@ -61,7 +61,14 @@
 
 /* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
 #define DHT22_CNF_INPUT_PULL  0x8U /* input, pull-up/pull-down (ODR picks pull-up) */
-#define DHT22_CNF_OUT_PP_2MHZ 0x2U /* output push-pull, 2 MHz */
+/* Open-drain, not push-pull.  Wokwi's DHT22 model drives the data line itself
+   and holds it high while it is idle, so a push-pull low from the MCU leaves two
+   push-pull drivers fighting over one wire; the model then reads an undefined
+   level rather than a start pulse, never replies, and every read times out
+   (status 2).  An open-drain low only sinks, which resolves to a clean low.  It
+   needs no pull-up here because the start pulse only ever drives the line down;
+   the release below supplies the high. */
+#define DHT22_CNF_OUT_OD_2MHZ 0x6U /* output open-drain, 2 MHz */
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
 
@@ -100,7 +107,7 @@ static void DHT22_SetConfig(DHT22_t *dht, uint32_t config) {
 
 static void DHT22_DriveLow(DHT22_t *dht) {
     dht->port->BRR = dht->pin;
-    DHT22_SetConfig(dht, DHT22_CNF_OUT_PP_2MHZ);
+    DHT22_SetConfig(dht, DHT22_CNF_OUT_OD_2MHZ);
 }
 
 /* Returning the line to an input is not enough on its own: with GPIO_NOPULL the
