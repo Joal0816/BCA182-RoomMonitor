@@ -64,8 +64,9 @@
 /* Push-pull, not open-drain.  Wokwi's STM32 single-wire drivers only ever
    switch between a push-pull output and a high-Z input, and the simulator's
    handling of open-drain output is not something to depend on; the start pulse
-   only needs to sink the line, which a push-pull low does directly.  The reply
-   is unaffected either way, because the sensor model drives both of its levels. */
+   only needs to sink the line, which a push-pull low does directly.  The mode
+   also decides what the release can do: an open-drain pin cannot drive the line
+   high, so the rising edge described in DHT22_Release would have no source. */
 #define DHT22_CNF_OUT_PP_2MHZ 0x2U /* output push-pull, 2 MHz */
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
@@ -100,7 +101,10 @@ static uint32_t DHT22_PinIndex(uint16_t pin) {
    HAL_GPIO_Init cannot be used here: it validates its arguments and touches RCC
    on every call, and the release-then-listen step has to complete within the
    few microseconds between the sensor letting go of the line and starting its
-   reply. */
+   reply.  The read-modify-write is not atomic, so a concurrent writer to another
+   pin of the same port -- an ISR, or GPIO init moved to run time -- could lose
+   its nibble; every pin is configured at boot today, so the driver is safe as a
+   single instance on a dedicated pin, and should stay that way. */
 static void DHT22_SetConfig(DHT22_t *dht, uint32_t config) {
     uint32_t index = DHT22_PinIndex(dht->pin);
     volatile uint32_t *reg;
