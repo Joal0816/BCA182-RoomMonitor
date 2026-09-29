@@ -96,6 +96,38 @@ def main():
                 mcu_pin = dst.split(":", 1)[1].rstrip(".")
                 wiring[dev][pin] = mcu_pin
 
+    # Discrete pull-up resistors.  A wokwi-resistor that bridges a module signal
+    # line to an MCU power rail sits *between* two nets, so the module -> MCU
+    # map above cannot see it: the DHT22's data pin looks like an unpulled GPIO
+    # even though diagram.json declares the bias resistor.  Recover them here so
+    # the figure cannot quietly drop a part the simulator depends on.
+    POWER_PINS = {"3V3.1", "5V.1", "GND.1"}
+    pullups = []
+    for part in spec["parts"]:
+        pid = part["id"]
+        if part["type"] != "wokwi-resistor" or pid in wiring:
+            continue
+        nets = [
+            dst
+            for a, b, *_ in conns
+            for src, dst in ((a, b), (b, a))
+            if src.partition(":")[0] == pid
+        ]
+        sig = pwr = None
+        for net in nets:
+            dev, _, pin = net.partition(":")
+            if dev in wiring and wiring[dev].get(pin) not in (None, *POWER_PINS):
+                sig = net
+            elif dev == "mcu" and pin in POWER_PINS:
+                pwr = net
+        if sig and pwr:
+            value = part.get("attrs", {}).get("value", "")
+            try:
+                value = f"{int(value) / 1000:g}k"
+            except (TypeError, ValueError):
+                pass
+            pullups.append((sig, pwr, value))
+
     img = Image.new("RGB", (W * SCALE, H * SCALE), BG)
     d = ImageDraw.Draw(img)
     f_title = font(15, True)
@@ -191,6 +223,48 @@ def main():
             fn = FUNCTIONS.get(pid, {}).get(pin, pin)
             d.text(((x_in - 96) * SCALE, (y_in - 11) * SCALE), fn,
                    font=f_pin, fill=MUTED)
+
+    # --- pull-up resistors ---------------------------------------------
+    # Drawn as a small resistor in the gap below the module's signal rows, with
+    # junction dots on the two rails it ties together.
+    for sig_net, pwr_net, value in pullups:
+        mdev, _, mpin = sig_net.partition(":")
+        _, _, ppin = pwr_net.partition(":")
+        if mdev not in box_links or mpin not in box_links[mdev]:
+            continue
+        x_in, y_sig = box_links[mdev][mpin]
+        y_pwr = next(
+            (y for pin, (_, y) in box_links[mdev].items()
+             if wiring[mdev].get(pin) == ppin),
+            None,
+        )
+        if y_pwr is None:
+            continue
+        ymid = max(y_sig, y_pwr) + 22
+        cx = x_in - 180
+        half_w, half_h = 32, 6
+        x_pwr_leg, x_sig_leg = cx - 48, cx + 48
+        # leads and legs
+        for (x0, y0), (x1, y1) in (
+            ((cx - half_w, ymid), (x_pwr_leg, ymid)),
+            ((cx + half_w, ymid), (x_sig_leg, ymid)),
+            ((x_pwr_leg, ymid), (x_pwr_leg, y_pwr)),
+            ((x_sig_leg, ymid), (x_sig_leg, y_sig)),
+        ):
+            d.line([(x0 * SCALE, y0 * SCALE), (x1 * SCALE, y1 * SCALE)],
+                   fill=BORDER, width=SCALE)
+        # body
+        d.rectangle(
+            [(cx - half_w) * SCALE, (ymid - half_h) * SCALE,
+             (cx + half_w) * SCALE, (ymid + half_h) * SCALE],
+            fill=PANEL, outline=ACCENT, width=SCALE)
+        # junction dots where the legs meet the rails
+        for jx, jy in ((x_pwr_leg, y_pwr), (x_sig_leg, y_sig)):
+            d.ellipse([(jx * SCALE - 2 * SCALE, jy * SCALE - 2 * SCALE),
+                       (jx * SCALE + 2 * SCALE, jy * SCALE + 2 * SCALE)],
+                      fill=ACCENT)
+        d.text(((cx - half_w - 78) * SCALE, (ymid - 6) * SCALE),
+               f"{value} pull-up", font=f_pin, fill=ACCENT)
 
     # --- serial monitor -------------------------------------------------
     y_ser = 74 + len(MODULE_ORDER) * (box_h + gap) + 6

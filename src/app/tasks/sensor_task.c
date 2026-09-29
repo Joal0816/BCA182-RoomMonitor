@@ -30,19 +30,6 @@ void SensorTask(void *pvParameters) {
         if (dht_status == DHT22_OK) {
             data.temperature = DHT22_GetTemperature(params->dht22);
             data.humidity = DHT22_GetHumidity(params->dht22);
-            /* TEMPORARY DIAGNOSTIC -- remove before committing.  The same line
-               is printed on success too, so a single successful rerun proves
-               ref > 0 and shows the response/bit ratio the decode used. */
-            UART_Mutex_Printf(params->uart_mutex,
-                             "[DHTDIAG] idle=%u released=%u stage=%u bit=%u final=%u dwt=%u ref=%u iters=%u\r\n",
-                             (unsigned)DHT22_DiagIdle,
-                             (unsigned)DHT22_DiagReleased,
-                             (unsigned)DHT22_DiagStage,
-                             (unsigned)DHT22_DiagBit,
-                             (unsigned)DHT22_DiagFinal,
-                             (unsigned)DHT22_DiagDwt,
-                             (unsigned)DHT22_DiagRefIters,
-                             (unsigned)DHT22_DiagBitIters);
         } else {
             data.temperature = NAN;
             data.humidity = NAN;
@@ -53,23 +40,6 @@ void SensorTask(void *pvParameters) {
             UART_Mutex_Printf(params->uart_mutex,
                              "[SENSOR] DHT22 read error (status=%u)\r\n",
                              (unsigned)dht_status);
-            /* TEMPORARY DIAGNOSTIC -- remove before committing.  idle/released
-               are the line levels either side of the start pulse, stage is the
-               wait that expired (1 = response low, 2 = response high, 3 = first
-               bit, 4 = the line never returned to idle high, 5 = a bit's rising
-               edge, 6 = a bit's falling edge), bit is the bit index for 5 and 6,
-               final is the level it gave up on, dwt is whether the cycle-counter
-               path was taken. */
-            UART_Mutex_Printf(params->uart_mutex,
-                             "[DHTDIAG] idle=%u released=%u stage=%u bit=%u final=%u dwt=%u ref=%u iters=%u\r\n",
-                             (unsigned)DHT22_DiagIdle,
-                             (unsigned)DHT22_DiagReleased,
-                             (unsigned)DHT22_DiagStage,
-                             (unsigned)DHT22_DiagBit,
-                             (unsigned)DHT22_DiagFinal,
-                             (unsigned)DHT22_DiagDwt,
-                             (unsigned)DHT22_DiagRefIters,
-                             (unsigned)DHT22_DiagBitIters);
         }
 
         if (LDR_Read(params->ldr) == LDR_OK) {

@@ -80,26 +80,6 @@
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
 
-/* TEMPORARY DIAGNOSTIC -- remove before committing.  Every read fails with
-   DHT22_TIMEOUT, which does not say which wait expired nor what the line was
-   doing when it did.  These record the two levels that separate "the line never
-   rises" from "the sensor never answers", the wait that failed, and whether the
-   DWT path was taken at all.
-
-   Stage: 0 = handshake passed, 1 = response low, 2 = response high, 3 = first
-   bit, 4 = the line never returned to idle high, 5 = a bit's rising edge,
-   6 = a bit's falling edge.  The bit loop sets a stage too: without that, a
-   frame that dies part-way through would print stage 0 and look exactly like a
-   handshake that passed. */
-volatile uint8_t DHT22_DiagIdle;     /* IDR before the start pulse */
-volatile uint8_t DHT22_DiagReleased; /* IDR straight after DHT22_Release */
-volatile uint8_t DHT22_DiagStage;    /* 0 = handshake passed, else the wait that failed */
-volatile uint8_t DHT22_DiagFinal;    /* IDR when that wait gave up */
-volatile uint8_t DHT22_DiagBit;      /* bit index when stage is 5 or 6 */
-volatile uint8_t DHT22_DiagDwt;      /* DHT22_CycleCounterReady() verdict */
-volatile uint16_t DHT22_DiagRefIters;  /* response-high poll count */
-volatile uint16_t DHT22_DiagBitIters;  /* last bit's poll count */
-
 static uint32_t DHT22_PinIndex(uint16_t pin) {
     uint32_t index = 0;
     while (index < DHT22_PIN_COUNT && (pin & (1UL << index)) == 0U) {
@@ -294,19 +274,12 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     uint32_t bound_scale = nominal_scale;
     uint32_t wait_budget = DHT22_EDGE_US * bound_scale;
 
-    DHT22_DiagDwt = measure;
-    DHT22_DiagIdle = DHT22_IsHigh(dht);
-
     DHT22_DriveLow(dht);
     vTaskDelay(pdMS_TO_TICKS(DHT22_START_LOW_MS));
 
     taskENTER_CRITICAL();
 
     DHT22_Release(dht);
-    DHT22_DiagReleased = DHT22_IsHigh(dht);
-    DHT22_DiagStage = 0;
-    DHT22_DiagBit = 0;
-    DHT22_DiagFinal = 0;
 
     /* The line idles high once the host lets go of it; the sensor answers 20-40
        us later with its 80 us low.  Waiting for that idle high first is what
@@ -315,8 +288,6 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        response-low wait returns immediately, every later level is then read one
        edge early, and the frame runs off its end and times out. */
     if (!DHT22_WaitHigh(dht, &wait_budget)) {
-        DHT22_DiagStage = 4;
-        DHT22_DiagFinal = DHT22_IsHigh(dht);
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
@@ -328,14 +299,10 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
        the counter, rather than trusting SystemCoreClock, is what keeps the bit
        decode correct when the two do not agree. */
     if (!DHT22_WaitLow(dht, &wait_budget)) {
-        DHT22_DiagStage = 1;
-        DHT22_DiagFinal = DHT22_IsHigh(dht);
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
     if (!DHT22_WaitHigh(dht, &wait_budget)) {
-        DHT22_DiagStage = 2;
-        DHT22_DiagFinal = DHT22_IsHigh(dht);
         taskEXIT_CRITICAL();
         return DHT22_TIMEOUT;
     }
@@ -345,8 +312,6 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     if (measure) {
         uint32_t rise = DWT->CYCCNT;
         if (!DHT22_WaitLow(dht, &wait_budget)) {
-            DHT22_DiagStage = 3;
-            DHT22_DiagFinal = DHT22_IsHigh(dht);
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
@@ -368,22 +333,28 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         /* No cycle counter: the response high is the one fixed-width pulse in the
            frame, so count how many poll iterations it lasts and use that count as
            the scale for every bit.  The same loop body measures the bits, so the
-           instruction rate cancels in the ratio and the decode is clock-independent. */
+           instruction rate cancels in the ratio and the decode is clock-independent.
+           This loop and the per-bit count loop below must stay instruction-identical:
+           the 3/5 ratio assumes both counts came from the same loop body, so adding
+           code to one but not the other biases the comparison. */
         while (DHT22_IsHigh(dht)) {
             if (++ref_iters >= DHT22_EDGE_TIMEOUT) {
-                DHT22_DiagStage = 3;
-                DHT22_DiagFinal = DHT22_IsHigh(dht);
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
         }
-        if (ref_iters == 0U) { /* cannot scale a ratio from nothing */
-            DHT22_DiagStage = 3;
-            DHT22_DiagFinal = DHT22_IsHigh(dht);
+        /* The 3/5 decode needs a few iterations of resolution: below 8 the
+           response pulse is too short for a one-iteration alignment error to stay
+           under the threshold, so a frame that cannot be resolved fails closed
+           here rather than risking a coin-flip frame. */
+        if (ref_iters < 8U) {
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
-        DHT22_DiagRefIters = (uint16_t)ref_iters;
+        /* Bounded stall: the per-bit worst case on this no-DWT path is the
+           WaitHigh guard plus the count guard, 40 times, all inside the critical
+           section with SysTick masked, so the path assumes a bounded sensor stall.
+           It is the simulator/no-DWT path only. */
     }
 
     /* The reply has supplied a measured rate and bound_scale is the higher of it
@@ -396,9 +367,6 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     for (int i = 0; i < 40; i++) {
         /* Rising edge: end of the 50 us low pulse that opens every bit. */
         if (!DHT22_WaitHigh(dht, &wait_budget)) {
-            DHT22_DiagStage = 5;
-            DHT22_DiagBit = (uint8_t)i;
-            DHT22_DiagFinal = DHT22_IsHigh(dht);
             taskEXIT_CRITICAL();
             return DHT22_TIMEOUT;
         }
@@ -406,9 +374,6 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         if (measure) {
             uint32_t rise = DWT->CYCCNT;
             if (!DHT22_WaitLow(dht, &wait_budget)) {
-                DHT22_DiagStage = 6;
-                DHT22_DiagBit = (uint8_t)i;
-                DHT22_DiagFinal = DHT22_IsHigh(dht);
                 taskEXIT_CRITICAL();
                 return DHT22_TIMEOUT;
             }
@@ -417,18 +382,17 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             /* Count this bit's high pulse in the same poll loop that measured the
                response high, and decode it against that reference: anything above
                48/80 (3/5) of it is a "1".  The count loop ends when the line falls,
-               so it also serves as the falling-edge wait. */
+               so it also serves as the falling-edge wait.  This loop and the
+               response-high count loop above must stay instruction-identical: the
+               3/5 ratio assumes both counts came from the same loop body, so adding
+               code to one but not the other biases the comparison. */
             uint32_t iters = 0U;
             while (DHT22_IsHigh(dht)) {
                 if (++iters >= DHT22_EDGE_TIMEOUT) {
-                    DHT22_DiagStage = 6;
-                    DHT22_DiagBit = (uint8_t)i;
-                    DHT22_DiagFinal = DHT22_IsHigh(dht);
                     taskEXIT_CRITICAL();
                     return DHT22_TIMEOUT;
                 }
             }
-            DHT22_DiagBitIters = (uint16_t)iters;
             high_us[i] = (iters * DHT22_REF_TO_ONE_DEN > ref_iters * DHT22_REF_TO_ONE_NUM)
                          ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
         }
