@@ -60,14 +60,12 @@
 #define DHT22_ONE_THRESHOLD_US 48U
 
 /* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
+#define DHT22_CNF_INPUT_FLOAT 0x4U /* input, floating (high-Z) */
 #define DHT22_CNF_INPUT_PULL  0x8U /* input, pull-up/pull-down (ODR picks pull-up) */
 /* Open-drain, not push-pull.  Wokwi's DHT22 model drives the data line itself
-   and holds it high while it is idle, so a push-pull low from the MCU leaves two
-   push-pull drivers fighting over one wire; the model then reads an undefined
-   level rather than a start pulse, never replies, and every read times out
-   (status 2).  An open-drain low only sinks, which resolves to a clean low.  It
-   needs no pull-up here because the start pulse only ever drives the line down;
-   the release below supplies the high. */
+   while it answers, so a push-pull low from the MCU would leave two drivers
+   fighting over one wire during the reply.  An open-drain low only sinks, which
+   resolves to a clean low. */
 #define DHT22_CNF_OUT_OD_2MHZ 0x6U /* output open-drain, 2 MHz */
 
 #define DHT22_DWT_CYCCNTENA (1UL << 0UL)
@@ -128,13 +126,19 @@ static void DHT22_DriveLow(DHT22_t *dht) {
     DHT22_SetConfig(dht, DHT22_CNF_OUT_OD_2MHZ);
 }
 
-/* Returning the line to an input is not enough on its own: with GPIO_NOPULL the
-   pin is left floating as soon as the sensor stops driving it, so nothing pulls
-   it back high and the reply never starts.  Selecting input with the internal
-   pull-up (CNF = 10) and ODR = 1 is what supplies that bias. */
+/* Release the line to a true high-Z input, not to the internal pull-up.
+   Wokwi's STM32 does not model the internal pull-up as a weak bias on the net,
+   so selecting input with pull-up (CNF = 10) leaves the pin asserting a level of
+   its own instead of handing the wire to the sensor: the sensor's low pulses are
+   masked, it never looks like it replied, and every read times out with status
+   2.  A floating input lets the sensor own the bus, and the discrete 4.7 kOhm
+   pull-up on dht22:SDA in diagram.json supplies the idle high that the sensor's
+   open-drain release and the MCU's own waits both need.  This is also what the
+   driver did before the register rewrite (HAL_GPIO_Init, GPIO_MODE_INPUT +
+   GPIO_NOPULL), which is the configuration the report's WF-01 row records. */
 static void DHT22_Release(DHT22_t *dht) {
-    dht->port->BSRR = dht->pin; /* ODR = 1 selects the pull-up, not the pull-down */
-    DHT22_SetConfig(dht, DHT22_CNF_INPUT_PULL);
+    dht->port->BSRR = dht->pin; /* ODR = 1: drive high, should the pin be driven */
+    DHT22_SetConfig(dht, DHT22_CNF_INPUT_FLOAT);
 }
 
 static inline uint8_t DHT22_IsHigh(const DHT22_t *dht) {

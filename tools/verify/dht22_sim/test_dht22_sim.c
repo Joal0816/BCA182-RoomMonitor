@@ -120,8 +120,12 @@ void test_line_is_released_after_frame(void) {
 
     TEST_ASSERT_EQUAL(DHT22_OK, DHT22_Read(&dht));
 
-    /* PB1 -> CRL bits [7:4]; CNF=10 (input with pull-up) + MODE=00 is 0x8. */
-    TEST_ASSERT_EQUAL(0x0080U, sim_port.CRL & 0x00F0U);
+    /* PB1 -> CRL bits [7:4]; CNF=01 (floating input) + MODE=00 is 0x4.  The
+       line is handed back to the sensor as high-Z, not biased by the MCU: the
+       idle high comes from the discrete 4.7 kOhm pull-up on dht22:SDA, because
+       Wokwi's STM32 does not model the internal pull-up as a weak bias on the
+       net (selecting it masks the sensor's own low pulses). */
+    TEST_ASSERT_EQUAL(0x0040U, sim_port.CRL & 0x00F0U);
 }
 
 void test_decode_threshold_accepts_48us_as_zero(void) {
