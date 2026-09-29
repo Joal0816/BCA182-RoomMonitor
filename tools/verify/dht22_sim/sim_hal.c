@@ -30,7 +30,12 @@ static uint32_t g_counter_cycles_per_us = 72U;
  * for a moment after the release.  Modelling that is what gives the driver's
  * idle-high wait something to do: with the line already high at the release the
  * wait is a no-op, and the model cannot tell the fixed driver apart from one
- * that goes straight to waiting for the reply. */
+ * that goes straight to waiting for the reply.
+ *
+ * This is load-bearing, not decoration.  Verified by disabling the leading wait
+ * in dht22.c: 28 sim assertions then fail.  Without the rise window that
+ * experiment would pass, because every edge would still land where the broken
+ * driver expects it.  Do not "simplify" this back to a high line at t = 0. */
 #define DHT22_SIM_RISE_US          2U
 
 /* How long the line then idles high before the sensor answers.  The datasheet

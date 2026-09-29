@@ -308,6 +308,7 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
     DHT22_Release(dht);
     DHT22_DiagReleased = DHT22_IsHigh(dht);
     DHT22_DiagStage = 0;
+    DHT22_DiagBit = 0;
     DHT22_DiagFinal = 0;
 
     /* The line idles high once the host lets go of it; the sensor answers 20-40
