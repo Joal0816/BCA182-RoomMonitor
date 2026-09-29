@@ -98,8 +98,12 @@ hardware-independent: it polls `GPIO_TypeDef.IDR` directly and measures every
 pulse with `DWT->CYCCNT`. `dht22_sim/` compiles the real driver
 (`src/app/hal/dht22.c`) unmodified against a host model of the sensor, so the
 frame decode, the checksum check and the timeout paths can be exercised without
-a board or Wokwi. It is what pins down the driver's own claim that it releases
-the line to the internal pull-up rather than leaving it floating.
+a board or Wokwi. It also pins the driver's release down: `test_line_is_released_after_frame`
+asserts the `CRL` nibble the driver leaves behind is `0x4` (input, floating),
+not `0x8` (input with pull-up). The line model itself never reads `CRL`, so the
+nibble assert is what holds that behaviour; a driver that biased the line with
+the internal pull-up would still pass the frame tests, which is the one fidelity
+gap this simulation knowingly carries.
 
 The injection is contained in `dht22_sim_prefix.h`, which gcc `-include`s into
 that one translation unit. It replaces the `DWT` the stub header declares with a

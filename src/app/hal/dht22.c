@@ -61,7 +61,6 @@
 
 /* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
 #define DHT22_CNF_INPUT_FLOAT 0x4U /* input, floating (high-Z) */
-#define DHT22_CNF_INPUT_PULL  0x8U /* input, pull-up/pull-down (ODR picks pull-up) */
 /* Open-drain, not push-pull.  Wokwi's DHT22 model drives the data line itself
    while it answers, so a push-pull low from the MCU would leave two drivers
    fighting over one wire during the reply.  An open-drain low only sinks, which
