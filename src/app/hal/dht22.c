@@ -345,11 +345,13 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         }
         /* The 3/5 decode needs a few iterations of resolution: below 8 the
            response pulse is too short for a one-iteration alignment error to stay
-           under the threshold, so a frame that cannot be resolved fails closed
-           here rather than risking a coin-flip frame. */
+           under the threshold.  The handshake, response-low and response-high
+           waits all passed by now, so the sensor did answer -- it is only the
+           reply that was too short to resolve -- which is DHT22_ERROR, not the
+           DHT22_TIMEOUT a silent sensor would give. */
         if (ref_iters < 8U) {
             taskEXIT_CRITICAL();
-            return DHT22_TIMEOUT;
+            return DHT22_ERROR;
         }
         /* Bounded stall: the per-bit worst case on this no-DWT path is the
            WaitHigh guard plus the count guard, 40 times, all inside the critical

@@ -78,6 +78,25 @@ def font(size, bold=False):
     return ImageFont.load_default()
 
 
+def resistor_label(raw):
+    """Human-readable resistance for a pull-up label.
+
+    Values arrive in ohms.  Scale to the largest unit that keeps the number at
+    least 1, so 4700 -> "4.7k" and a 4.7 MOhm part -> "4.7M" rather than the
+    "4700k" a fixed /1000 would print.  Below 1 kOhm the ohms are shown with an
+    explicit "R" so a bare number is not mistaken for a scaled one.
+    """
+    try:
+        ohms = float(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    if ohms >= 1_000_000:
+        return f"{ohms / 1_000_000:g}M"
+    if ohms >= 1_000:
+        return f"{ohms / 1_000:g}k"
+    return f"{ohms:g}R"
+
+
 def main():
     spec = json.loads(SRC.read_text())
     parts = {p["id"]: p for p in spec["parts"]}
@@ -96,17 +115,21 @@ def main():
                 mcu_pin = dst.split(":", 1)[1].rstrip(".")
                 wiring[dev][pin] = mcu_pin
 
-    # Discrete pull-up resistors.  A wokwi-resistor that bridges a module signal
-    # line to an MCU power rail sits *between* two nets, so the module -> MCU
-    # map above cannot see it: the DHT22's data pin looks like an unpulled GPIO
-    # even though diagram.json declares the bias resistor.  Recover them here so
-    # the figure cannot quietly drop a part the simulator depends on.
+    # Discrete pull-up resistors.  A wokwi-resistor that bridges a signal line to
+    # an MCU power rail sits *between* two nets, so the module -> MCU map above
+    # cannot see it: the DHT22's data pin looks like an unpulled GPIO even though
+    # diagram.json declares the bias resistor.  Recover them here so the figure
+    # cannot quietly drop a part the simulator depends on.  Both shapes count:
+    # a module signal pin to a power rail, and an MCU signal pin (the I2C bus
+    # pull-ups on B6/B7) to a power rail.  Every wokwi-resistor that stays
+    # undrawn is reported instead of skipped in silence.
     POWER_PINS = {"3V3.1", "5V.1", "GND.1"}
     pullups = []
+    warnings = {}
     for part in spec["parts"]:
-        pid = part["id"]
-        if part["type"] != "wokwi-resistor" or pid in wiring:
+        if part["type"] != "wokwi-resistor":
             continue
+        pid = part["id"]
         nets = [
             dst
             for a, b, *_ in conns
@@ -116,17 +139,27 @@ def main():
         sig = pwr = None
         for net in nets:
             dev, _, pin = net.partition(":")
-            if dev in wiring and wiring[dev].get(pin) not in (None, *POWER_PINS):
-                sig = net
-            elif dev == "mcu" and pin in POWER_PINS:
+            pin = pin.rstrip(".")  # match the builder's pin-name convention
+            if dev == "mcu" and pin in POWER_PINS:
                 pwr = net
-        if sig and pwr:
-            value = part.get("attrs", {}).get("value", "")
-            try:
-                value = f"{int(value) / 1000:g}k"
-            except (TypeError, ValueError):
-                pass
-            pullups.append((sig, pwr, value))
+            elif dev in wiring and wiring[dev].get(pin) not in (None, *POWER_PINS):
+                sig = net
+            elif dev == "mcu":
+                sig = net
+        if pid == "led_r":
+            # The indicator's series resistor is deliberately drawn as part of
+            # the "LED + 330R" box, so it is not a missing pull-up.
+            warnings[pid] = "represented by the LED + 330R box"
+            continue
+        if sig is None:
+            warnings[pid] = ("no signal net to draw against"
+                             if pwr is not None else "no signal or power net")
+            continue
+        if pwr is None:
+            warnings[pid] = "no MCU power-rail net"
+            continue
+        pullups.append((pid, sig, pwr, resistor_label(
+            part.get("attrs", {}).get("value", ""))))
 
     img = Image.new("RGB", (W * SCALE, H * SCALE), BG)
     d = ImageDraw.Draw(img)
@@ -226,11 +259,27 @@ def main():
 
     # --- pull-up resistors ---------------------------------------------
     # Drawn as a small resistor in the gap below the module's signal rows, with
-    # junction dots on the two rails it ties together.
-    for sig_net, pwr_net, value in pullups:
-        mdev, _, mpin = sig_net.partition(":")
-        _, _, ppin = pwr_net.partition(":")
-        if mdev not in box_links or mpin not in box_links[mdev]:
+    # junction dots on the two rails it ties together.  A pull-up that lands on
+    # an MCU pin is anchored through whichever module already carries that net,
+    # so the I2C bus pull-ups are drawn at the SSD1306's SCL/SDA rows.
+    slot_by_module = {}
+    for pid, sig_net, pwr_net, value in pullups:
+        sdev, _, spin = sig_net.partition(":")
+        spin = spin.rstrip(".")
+        ppin = pwr_net.partition(":")[2].rstrip(".")
+        if sdev in box_links:
+            mdev, mpin = sdev, spin
+        else:
+            mdev = mpin = None
+            for cand in MODULE_ORDER:
+                for cpin, mcu_pin in wiring[cand].items():
+                    if mcu_pin == spin:
+                        mdev, mpin = cand, cpin
+                        break
+                if mdev is not None:
+                    break
+        if mdev is None or mpin not in box_links.get(mdev, {}):
+            warnings.setdefault(pid, f"MCU pin {spin} has no module row to draw")
             continue
         x_in, y_sig = box_links[mdev][mpin]
         y_pwr = next(
@@ -239,8 +288,11 @@ def main():
             None,
         )
         if y_pwr is None:
+            warnings.setdefault(pid, f"module {mdev} has no pin on {ppin}")
             continue
-        ymid = max(y_sig, y_pwr) + 22
+        slot = slot_by_module.get(mdev, 0)
+        slot_by_module[mdev] = slot + 1
+        ymid = max(y_sig, y_pwr) + 22 + slot * 18
         cx = x_in - 180
         half_w, half_h = 32, 6
         x_pwr_leg, x_sig_leg = cx - 48, cx + 48
@@ -308,6 +360,10 @@ def main():
     out.save(DST, "PNG", optimize=True)
     print(f"wrote {DST.relative_to(ROOT)}  "
           f"({len(spec['parts'])} parts, {len(conns)} connections)")
+    print(f"pull-ups drawn: {', '.join(pid for pid, *_ in pullups) or 'none'}")
+    for pid, reason in warnings.items():
+        print(f"warning: {pid} not drawn as a pull-up ({reason})",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":

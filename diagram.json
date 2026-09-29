@@ -61,6 +61,24 @@
       }
     },
     {
+      "type": "wokwi-resistor",
+      "id": "i2c_scl_pullup",
+      "top": -60,
+      "left": 250,
+      "attrs": {
+        "value": "4700"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "i2c_sda_pullup",
+      "top": -60,
+      "left": 380,
+      "attrs": {
+        "value": "4700"
+      }
+    },
+    {
       "type": "wokwi-ky-040",
       "id": "encoder",
       "top": 360,
@@ -212,6 +230,30 @@
       [
         "v0"
       ]
+    ],
+    [
+      "mcu:B6",
+      "i2c_scl_pullup:1",
+      "blue",
+      []
+    ],
+    [
+      "i2c_scl_pullup:2",
+      "mcu:3V3.1",
+      "red",
+      []
+    ],
+    [
+      "mcu:B7",
+      "i2c_sda_pullup:1",
+      "magenta",
+      []
+    ],
+    [
+      "i2c_sda_pullup:2",
+      "mcu:3V3.1",
+      "red",
+      []
     ],
     [
       "mcu:3V3.1",
