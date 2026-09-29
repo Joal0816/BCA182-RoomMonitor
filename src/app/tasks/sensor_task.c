@@ -30,6 +30,19 @@ void SensorTask(void *pvParameters) {
         if (dht_status == DHT22_OK) {
             data.temperature = DHT22_GetTemperature(params->dht22);
             data.humidity = DHT22_GetHumidity(params->dht22);
+            /* TEMPORARY DIAGNOSTIC -- remove before committing.  The same line
+               is printed on success too, so a single successful rerun proves
+               ref > 0 and shows the response/bit ratio the decode used. */
+            UART_Mutex_Printf(params->uart_mutex,
+                             "[DHTDIAG] idle=%u released=%u stage=%u bit=%u final=%u dwt=%u ref=%u iters=%u\r\n",
+                             (unsigned)DHT22_DiagIdle,
+                             (unsigned)DHT22_DiagReleased,
+                             (unsigned)DHT22_DiagStage,
+                             (unsigned)DHT22_DiagBit,
+                             (unsigned)DHT22_DiagFinal,
+                             (unsigned)DHT22_DiagDwt,
+                             (unsigned)DHT22_DiagRefIters,
+                             (unsigned)DHT22_DiagBitIters);
         } else {
             data.temperature = NAN;
             data.humidity = NAN;
@@ -48,13 +61,15 @@ void SensorTask(void *pvParameters) {
                final is the level it gave up on, dwt is whether the cycle-counter
                path was taken. */
             UART_Mutex_Printf(params->uart_mutex,
-                             "[DHTDIAG] idle=%u released=%u stage=%u bit=%u final=%u dwt=%u\r\n",
+                             "[DHTDIAG] idle=%u released=%u stage=%u bit=%u final=%u dwt=%u ref=%u iters=%u\r\n",
                              (unsigned)DHT22_DiagIdle,
                              (unsigned)DHT22_DiagReleased,
                              (unsigned)DHT22_DiagStage,
                              (unsigned)DHT22_DiagBit,
                              (unsigned)DHT22_DiagFinal,
-                             (unsigned)DHT22_DiagDwt);
+                             (unsigned)DHT22_DiagDwt,
+                             (unsigned)DHT22_DiagRefIters,
+                             (unsigned)DHT22_DiagBitIters);
         }
 
         if (LDR_Read(params->ldr) == LDR_OK) {

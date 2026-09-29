@@ -20,11 +20,10 @@
 /* Timeout bound for the handshake levels, in microseconds.  This is a bound, not
    an expected value, so it is deliberately generous: the handshake runs before
    the reply has been timed, so it has to be converted with the firmware's own
-   idea of the clock, and it must still outlast the 80 us response pulses when
-   that idea understates the counter's real rate -- the case on a simulator whose
-   core runs at the board's nominal clock regardless of the RCC prescalers the
-   firmware programmed.  The worst such case is a nominal 8 MHz against a 72 MHz
-   counter, where 1000 * 8 / 72 leaves 111 us, still above 80 us. */
+   idea of the clock rather than a measured one.  The bound only applies on the
+   DWT path, where the counter really does tick in microseconds; when the counter
+   is unusable the waits fall back to the fixed iteration guard, which needs no
+   clock at all. */
 #define DHT22_EDGE_US 1000U
 
 /* Width of the sensor's response high pulse.  It is a fixed part of the
@@ -59,6 +58,16 @@
    boundary between the two encodings. */
 #define DHT22_ONE_THRESHOLD_US 48U
 
+/* A data bit is a 26-28 us high pulse for "0" and 70 us for "1"; the response
+   high that opens every frame is a fixed 80 us.  Without a cycle counter those
+   widths are counted in poll iterations instead, and a bit is decoded by
+   comparing its count against the response high's own count.  The 48 us decode
+   midpoint is 48/80 of the response pulse, which reduces to 3/5, and because
+   both counts come from the same loop the instruction rate cancels out of the
+   comparison -- so the decode does not depend on SystemCoreClock at all. */
+#define DHT22_REF_TO_ONE_NUM 3U
+#define DHT22_REF_TO_ONE_DEN 5U
+
 /* STM32F1 GPIO configuration nibbles (CNF[1:0] mode[1:0]). */
 #define DHT22_CNF_INPUT_FLOAT 0x4U /* input, floating (high-Z) */
 /* Push-pull, not open-drain.  Wokwi's STM32 single-wire drivers only ever
@@ -88,6 +97,8 @@ volatile uint8_t DHT22_DiagStage;    /* 0 = handshake passed, else the wait that
 volatile uint8_t DHT22_DiagFinal;    /* IDR when that wait gave up */
 volatile uint8_t DHT22_DiagBit;      /* bit index when stage is 5 or 6 */
 volatile uint8_t DHT22_DiagDwt;      /* DHT22_CycleCounterReady() verdict */
+volatile uint16_t DHT22_DiagRefIters;  /* response-high poll count */
+volatile uint16_t DHT22_DiagBitIters;  /* last bit's poll count */
 
 static uint32_t DHT22_PinIndex(uint16_t pin) {
     uint32_t index = 0;
@@ -161,19 +172,6 @@ static inline uint8_t DHT22_IsHigh(const DHT22_t *dht) {
     return (dht->port->IDR & dht->pin) != 0U;
 }
 
-static uint32_t DHT22_UsToCycles(uint32_t us) {
-    /* SystemCoreClock is 0 until SystemCoreClockUpdate() has run, and a zero
-       result would turn DHT22_Delay_us() into a no-op.  The floor keeps the
-       delay non-zero; it cannot make it accurate, because this path only runs
-       when the cycle counter is unusable and SystemCoreClock may itself be
-       stale.  The caller treats the result as best-effort settling, not timing. */
-    uint32_t cycles_per_us = SystemCoreClock / 1000000U;
-    if (cycles_per_us < DHT22_MIN_CYCLES_PER_US) {
-        cycles_per_us = DHT22_MIN_CYCLES_PER_US;
-    }
-    return us * cycles_per_us;
-}
-
 /* DWT_CTRL is a writable configuration register: it reads back set as soon as
    software writes it, even on cores where CYCCNT never actually advances.
    Treating that bit as proof the counter runs routes every timed loop into a
@@ -195,27 +193,6 @@ static uint8_t DHT22_CycleCounterReady(void) {
     }
 
     return ready;
-}
-
-static void DHT22_Delay_us(uint32_t us) {
-    if (us == 0U) {
-        return;
-    }
-
-    uint32_t cycles = DHT22_UsToCycles(us);
-
-    if (DHT22_CycleCounterReady()) {
-        uint32_t start = DWT->CYCCNT;
-        while ((DWT->CYCCNT - start) < cycles) {
-            /* A live counter always advances past `cycles`, so this loop is
-               bounded without needing a second timeout. */
-        }
-    } else {
-        /* Fallback: approximate delay using volatile loop, calibrated at
-           roughly four cycles per iteration. */
-        uint32_t count = cycles / 4U;
-        while (count--) { __asm__ volatile("nop"); }
-    }
 }
 
 /* Wait until the data line reaches `high` (1) or `low` (0), giving up after
@@ -363,6 +340,8 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         return DHT22_TIMEOUT;
     }
 
+    uint32_t ref_iters = 0U;
+
     if (measure) {
         uint32_t rise = DWT->CYCCNT;
         if (!DHT22_WaitLow(dht, &wait_budget)) {
@@ -385,11 +364,26 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
         if (cycles_per_us > bound_scale) {
             bound_scale = cycles_per_us;
         }
-    } else if (!DHT22_WaitLow(dht, &wait_budget)) {
-        DHT22_DiagStage = 3;
-        DHT22_DiagFinal = DHT22_IsHigh(dht);
-        taskEXIT_CRITICAL();
-        return DHT22_TIMEOUT;
+    } else {
+        /* No cycle counter: the response high is the one fixed-width pulse in the
+           frame, so count how many poll iterations it lasts and use that count as
+           the scale for every bit.  The same loop body measures the bits, so the
+           instruction rate cancels in the ratio and the decode is clock-independent. */
+        while (DHT22_IsHigh(dht)) {
+            if (++ref_iters >= DHT22_EDGE_TIMEOUT) {
+                DHT22_DiagStage = 3;
+                DHT22_DiagFinal = DHT22_IsHigh(dht);
+                taskEXIT_CRITICAL();
+                return DHT22_TIMEOUT;
+            }
+        }
+        if (ref_iters == 0U) { /* cannot scale a ratio from nothing */
+            DHT22_DiagStage = 3;
+            DHT22_DiagFinal = DHT22_IsHigh(dht);
+            taskEXIT_CRITICAL();
+            return DHT22_TIMEOUT;
+        }
+        DHT22_DiagRefIters = (uint16_t)ref_iters;
     }
 
     /* The reply has supplied a measured rate and bound_scale is the higher of it
@@ -420,18 +414,23 @@ static uint8_t DHT22_CaptureFrame(DHT22_t *dht, uint16_t *high_us) {
             }
             high_us[i] = (uint16_t)((DWT->CYCCNT - rise) / cycles_per_us);
         } else {
-            /* Without a cycle counter the width cannot be measured, so sample
-               past the 30 us mark and synthesise a width that falls on the
-               correct side of the decode threshold. */
-            DHT22_Delay_us(30);
-            high_us[i] = DHT22_IsHigh(dht) ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
-            if (!DHT22_WaitLow(dht, &wait_budget)) {
-                DHT22_DiagStage = 6;
-                DHT22_DiagBit = (uint8_t)i;
-                DHT22_DiagFinal = DHT22_IsHigh(dht);
-                taskEXIT_CRITICAL();
-                return DHT22_TIMEOUT;
+            /* Count this bit's high pulse in the same poll loop that measured the
+               response high, and decode it against that reference: anything above
+               48/80 (3/5) of it is a "1".  The count loop ends when the line falls,
+               so it also serves as the falling-edge wait. */
+            uint32_t iters = 0U;
+            while (DHT22_IsHigh(dht)) {
+                if (++iters >= DHT22_EDGE_TIMEOUT) {
+                    DHT22_DiagStage = 6;
+                    DHT22_DiagBit = (uint8_t)i;
+                    DHT22_DiagFinal = DHT22_IsHigh(dht);
+                    taskEXIT_CRITICAL();
+                    return DHT22_TIMEOUT;
+                }
             }
+            DHT22_DiagBitIters = (uint16_t)iters;
+            high_us[i] = (iters * DHT22_REF_TO_ONE_DEN > ref_iters * DHT22_REF_TO_ONE_NUM)
+                         ? (DHT22_ONE_THRESHOLD_US + 1U) : 0U;
         }
     }
 

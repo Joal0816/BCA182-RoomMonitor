@@ -42,5 +42,7 @@ extern volatile uint8_t DHT22_DiagStage;
 extern volatile uint8_t DHT22_DiagFinal;
 extern volatile uint8_t DHT22_DiagBit;
 extern volatile uint8_t DHT22_DiagDwt;
+extern volatile uint16_t DHT22_DiagRefIters;
+extern volatile uint16_t DHT22_DiagBitIters;
 
 #endif /* DHT22_H */
