@@ -25,7 +25,7 @@ typedef struct { uint32_t BaudRate; uint32_t WordLength; uint32_t StopBits; uint
 typedef struct {
     uint32_t CRL, CRH, IDR, ODR, BSRR, BRR, LCKR;
 } GPIO_TypeDef;
-typedef struct { void *Instance; I2C_InitTypeDef Init; } I2C_HandleTypeDef;
+typedef struct { void *Instance; I2C_InitTypeDef Init; uint32_t ErrorCode; } I2C_HandleTypeDef;
 typedef struct { void *Instance; ADC_InitTypeDef Init; } ADC_HandleTypeDef;
 typedef struct { void *Instance; TIM_Base_InitTypeDef Init; } TIM_HandleTypeDef;
 typedef struct { void *Instance; UART_InitTypeDef Init; } UART_HandleTypeDef;
@@ -112,6 +112,9 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define FLASH_LATENCY_0 0U
 #define FLASH_LATENCY_2 2U
 #define HAL_MAX_DELAY 0xFFFFFFFFU
+/* HAL I2C ErrorCode bits (stm32f1xx_hal_i2c.h). */
+#define HAL_I2C_ERROR_AF      0x00000004U
+#define HAL_I2C_ERROR_TIMEOUT 0x00000020U
 
 typedef enum { EXTI0_IRQn=6, EXTI1_IRQn=7, EXTI2_IRQn=8, EXTI3_IRQn=9, EXTI4_IRQn=10,
                EXTI9_5_IRQn=23, EXTI15_10_IRQn=40, WWDG_IRQn=0, PVD_IRQn=1, TAMPER_IRQn=2,
@@ -153,6 +156,7 @@ void HAL_NVIC_SetPriority(int irq, uint32_t pre, uint32_t sub);
 void HAL_NVIC_EnableIRQ(int irq);
 HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *h);
 HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *h, uint16_t a, uint8_t *d, uint16_t n, uint32_t t);
+HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *h, uint16_t a, uint32_t trials, uint32_t t);
 HAL_StatusTypeDef HAL_ADC_Init(ADC_HandleTypeDef *h);
 HAL_StatusTypeDef HAL_ADC_ConfigChannel(ADC_HandleTypeDef *h, ADC_ChannelConfTypeDef *cfg);
 HAL_StatusTypeDef HAL_ADC_Start(ADC_HandleTypeDef *h);

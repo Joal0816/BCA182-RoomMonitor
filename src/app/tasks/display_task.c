@@ -55,6 +55,18 @@ static void DrawMotionPage(OLED_t *oled, SensorData_t *data) {
     OLED_DrawString(oled, 10, 40, motion_str, 2);
 }
 
+/* Instrumentation: the recurring frame-transfer failure used to say only that
+   the panel was not ACKing.  Append the retained HAL status and ErrorCode so
+   every refresh carries the same NACK/timeout/busy/start classification the
+   boot path prints.  Removable once the bus fault is understood. */
+static void ReportFrameFailure(DisplayTaskParams_t *params) {
+    UART_Mutex_Printf(params->uart_mutex,
+                      "[OLED] frame transfer failed (panel not ACKing): status=%d ErrorCode=0x%02X (%s)\r\n",
+                      (int)params->oled->last_status,
+                      (unsigned)params->oled->last_error,
+                      OLED_FaultName(params->oled));
+}
+
 void DisplayTask(void *pvParameters) {
     DisplayTaskParams_t *params = (DisplayTaskParams_t *)pvParameters;
     SensorData_t data;
@@ -69,8 +81,7 @@ void DisplayTask(void *pvParameters) {
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
     if (OLED_Update(params->oled) != HAL_OK) {
-        UART_Mutex_Printf(params->uart_mutex,
-                          "[OLED] frame transfer failed (panel not ACKing)\r\n");
+        ReportFrameFailure(params);
     }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -114,8 +125,7 @@ void DisplayTask(void *pvParameters) {
             }
 
             if (OLED_Update(params->oled) != HAL_OK) {
-                UART_Mutex_Printf(params->uart_mutex,
-                                  "[OLED] frame transfer failed (panel not ACKing)\r\n");
+                ReportFrameFailure(params);
             }
         }
 

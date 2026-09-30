@@ -3,13 +3,19 @@
 
 static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
-    return HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1, data, 2,
-                                   OLED_I2C_TIMEOUT_MS);
+    HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                                                       data, 2, OLED_I2C_TIMEOUT_MS);
+    if (status != HAL_OK) {
+        /* Instrumentation: keep the HAL reason behind the failure. */
+        oled->last_error = oled->hi2c->ErrorCode;
+    }
+    return status;
 }
 
 HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c) {
     oled->hi2c = hi2c;
     oled->last_status = HAL_ERROR;
+    oled->last_error = 0;
     HAL_Delay(100);
 
     static const uint8_t init_seq[] = {
@@ -70,6 +76,8 @@ HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
     }
     if (HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
                                 tx_buf, sizeof(tx_buf), OLED_I2C_TIMEOUT_MS) != HAL_OK) {
+        /* Instrumentation: keep the HAL reason behind the failure. */
+        oled->last_error = oled->hi2c->ErrorCode;
         status = HAL_ERROR;
     }
 
@@ -159,4 +167,27 @@ void OLED_DrawProgressBar(OLED_t *oled, uint8_t x, uint8_t y, uint8_t w, uint8_t
     if (fill_w > 0) {
         OLED_FillRect(oled, x + 1, y + 1, fill_w - 1, h - 2, 1);
     }
+}
+
+/* Instrumentation, not production behaviour: reduce the retained HAL status and
+   ErrorCode to the one word that says which failure this was.  The ErrorCode bit
+   alone is ambiguous -- a stuck BUSY flag and an address timeout both set
+   HAL_I2C_ERROR_TIMEOUT -- so the HAL status discriminates them first. */
+const char *OLED_FaultName(const OLED_t *oled) {
+    if (oled->last_status == HAL_OK) {
+        return "ok";
+    }
+    if ((oled->last_error & HAL_I2C_ERROR_AF) != 0U) {
+        return "NACK";
+    }
+    if (oled->last_status == HAL_BUSY) {
+        return "busy";
+    }
+    if (oled->last_status == HAL_TIMEOUT) {
+        return "start";
+    }
+    if ((oled->last_error & HAL_I2C_ERROR_TIMEOUT) != 0U) {
+        return "timeout";
+    }
+    return "error";
 }

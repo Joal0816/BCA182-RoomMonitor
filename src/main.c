@@ -122,12 +122,41 @@ int main(void) {
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
+    /* --- Instrumentation: classify the OLED I2C failure (removable) --------
+       Every SSD1306 transaction fails on the current board, but the existing
+       message prints for any non-HAL_OK result, so a NACK is indistinguishable
+       from a timeout or a stuck bus.  Read the PB6/PB7 line levels around the
+       init (SCL is PB6, SDA is PB7) to see whether the bus is stuck low, print
+       the retained HAL status and ErrorCode decoded to a word, then probe the
+       address once with HAL_I2C_IsDeviceReady() for a binary ACK/NAK answer.
+       This block exists only to classify the fault and can be removed once it
+       is understood. */
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] bus before init: SCL(PB6)=%u SDA(PB7)=%u\r\n",
+                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6),
+                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7));
+
     /* Report the I2C result: a panel that never ACKs is otherwise
        indistinguishable from a panel that is present but not being drawn to. */
-    if (OLED_Init(&oled, &hi2c1) != HAL_OK) {
+    HAL_StatusTypeDef oled_status = OLED_Init(&oled, &hi2c1);
+    if (oled_status != HAL_OK) {
         UART_Mutex_Printf(&uart_mutex, "[OLED] init failed: no ACK from 0x%02X\r\n",
                           OLED_I2C_ADDR);
     }
+
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] bus after init: SCL(PB6)=%u SDA(PB7)=%u\r\n",
+                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6),
+                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7));
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] init status=%d ErrorCode=0x%02X (%s)\r\n",
+                      (int)oled_status, (unsigned)oled.last_error,
+                      OLED_FaultName(&oled));
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] probe 0x%02X: %s\r\n",
+                      OLED_I2C_ADDR,
+                      (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1), 1U, 50U) == HAL_OK)
+                          ? "address ACKs" : "address does not ACK");
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
@@ -178,8 +207,9 @@ int main(void) {
     created |= xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
     /* AlarmTask formats "%.1f" through UART_Mutex_Printf.  That call pulls the
        newlib float formatter (_svfprintf_r -> _printf_float -> _dtoa_r) into
-       this task and, because UART_Mutex_Printf keeps its 256-byte buffer in
-       the caller's frame, spends that much again in the same call chain.  256
+       this task and, because UART_Mutex_Printf's 256-byte formatting buffer is
+       a local in that function rather than a static, spends that much again on
+       this task's stack for the duration of the call.  256
        words (1 KB) did not cover both together, which is why the task tripped
        configCHECK_FOR_STACK_OVERFLOW once DHT22 reads started succeeding and
        the alarm line became reachable.  512 words matches SensorTask and
@@ -194,7 +224,10 @@ int main(void) {
     /* Instrumentation: the five stacks and their TCBs come out of a fixed
        12,288-byte heap, so raising AlarmTask's stack must not have quietly
        starved the others.  Report what is left once every allocation above
-       has been made. */
+       has been made.  This figure is not steady-state headroom: the
+       vTaskStartScheduler() below still has to allocate the idle task
+       (configMINIMAL_STACK_SIZE, 128 words) and the timer daemon
+       (configTIMER_TASK_STACK_DEPTH, 256 words) plus their TCBs. */
     UART_Mutex_Printf(&uart_mutex,
                       "[MAIN] FreeRTOS heap free after task creation: %u bytes\r\n",
                       (unsigned)xPortGetFreeHeapSize());

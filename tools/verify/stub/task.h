@@ -19,6 +19,7 @@ uint32_t ulTaskNotifyTake(BaseType_t clear, TickType_t w);
 BaseType_t xTaskNotifyGive(TaskHandle_t t);
 BaseType_t xTaskGetSchedulerState(void);
 /* Introspection API used by AlarmTask's runtime instrumentation. */
+/* Prototype for analysis only, not a definition: the harness never links. */
 UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t xTask);
 void vTaskNotifyGiveFromISR(TaskHandle_t t, BaseType_t *pxHigherPriorityTaskWoken);
 #define taskSCHEDULER_NOT_STARTED 0

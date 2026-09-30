@@ -19,25 +19,30 @@ void AlarmTask(void *pvParameters) {
                 TempStatus_t status = EvaluateTemperature(data.temperature);
                 Alarm_Update(params->alarm, status);
 
-                if (!margin_reported) {
-                    margin_reported = 1;
-                    /* uxTaskGetStackHighWaterMark() returns the words of stack
-                       this task never touched, i.e. the margin left after the
-                       float-formatter path above has run.  Printed once, on
-                       the first successful evaluation, so a rerun proves the
-                       margin exists instead of merely that the overflow hook
-                       stayed silent. */
-                    UART_Mutex_Printf(params->uart_mutex,
-                                      "[ALARM] Stack high-water mark: %u words free (at %.1fC)\r\n",
-                                      (unsigned)uxTaskGetStackHighWaterMark(NULL),
-                                      data.temperature);
-                }
-
                 if (Temperature_IsAlarm(status)) {
                     UART_Mutex_Printf(params->uart_mutex,
-                                     "[ALARM] Temp=%.1fC Status=%s\r\n",
-                                     data.temperature,
-                                     Temperature_GetStatusString(status));
+                                      "[ALARM] Temp=%.1fC Status=%s\r\n",
+                                      data.temperature,
+                                      Temperature_GetStatusString(status));
+
+                    if (!margin_reported) {
+                        margin_reported = 1;
+                        /* The margin is scanned only now, after the "%.1f"
+                           line above has run.  uxTaskGetStackHighWaterMark()
+                           reports the deepest point this task's stack has ever
+                           reached -- cumulative over the fill bytes nothing has
+                           touched -- so the newlib float formatter and the rest
+                           of the alarm path are counted.  Scanning before that
+                           line would report the pre-float margin and overstate
+                           it by exactly the cost this exists to measure.  The
+                           margin line itself formats no float, so measuring it
+                           does not deepen the stack after the scan.  Latched to
+                           print once, on the first alarm, because the float
+                           path is the deepest this task goes. */
+                        UART_Mutex_Printf(params->uart_mutex,
+                                          "[ALARM] Stack high-water mark: %u words free\r\n",
+                                          (unsigned)uxTaskGetStackHighWaterMark(NULL));
+                    }
                 }
             }
         }

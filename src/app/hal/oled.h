@@ -23,6 +23,13 @@ typedef struct {
        "OLED not on the bus", because HAL_I2C_Master_Transmit's status was
        previously discarded. */
     HAL_StatusTypeDef last_status;
+    /* Instrumentation: the HAL I2C ErrorCode from the most recent failed
+       transaction.  last_status alone cannot separate an address NACK from a
+       timeout from a stuck BUSY flag -- the HAL reports those with the same
+       HAL_ERROR or HAL_BUSY status -- so the code is retained for the boot-time
+       classification and for the recurring display failure.  It is reset to 0
+       when a fresh init sequence starts. */
+    uint32_t last_error;
 } OLED_t;
 
 /* Returns HAL_OK only if the whole init sequence was acknowledged. */
@@ -30,6 +37,10 @@ HAL_StatusTypeDef OLED_Init(OLED_t *oled, I2C_HandleTypeDef *hi2c);
 void OLED_Clear(OLED_t *oled);
 /* Returns the status of the frame-buffer transfer. */
 HAL_StatusTypeDef OLED_Update(OLED_t *oled);
+/* Instrumentation: name the retained I2C result as "ok", "NACK", "timeout",
+   "busy" or "start" (or "error" for anything else).  Exists only to classify
+   the OLED bus failure. */
+const char *OLED_FaultName(const OLED_t *oled);
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color);
 void OLED_DrawChar(OLED_t *oled, uint8_t x, uint8_t y, char c, uint8_t size);
 void OLED_DrawString(OLED_t *oled, uint8_t x, uint8_t y, const char *str, uint8_t size);

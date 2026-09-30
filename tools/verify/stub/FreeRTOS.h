@@ -25,6 +25,7 @@ void taskYIELD(void);
 void vApplicationIdleHook(void);
 void vTimerCallback(void *ulTimerID);
 /* Introspection API used by the application's boot-time instrumentation. */
+/* Prototype for analysis only, not a definition: the harness never links. */
 size_t xPortGetFreeHeapSize(void);
 /* CMSIS intrinsics the driver layer uses */
 #ifndef CMSIS_IRQ_STUBS
