@@ -176,12 +176,28 @@ int main(void) {
     created  = xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3, &input_task_params.task_handle);
     created |= xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3, &motion_task_params.task_handle);
     created |= xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2, NULL);
-    created |= xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2, NULL);
+    /* AlarmTask formats "%.1f" through UART_Mutex_Printf.  That call pulls the
+       newlib float formatter (_svfprintf_r -> _printf_float -> _dtoa_r) into
+       this task and, because UART_Mutex_Printf keeps its 256-byte buffer in
+       the caller's frame, spends that much again in the same call chain.  256
+       words (1 KB) did not cover both together, which is why the task tripped
+       configCHECK_FOR_STACK_OVERFLOW once DHT22 reads started succeeding and
+       the alarm line became reachable.  512 words matches SensorTask and
+       DisplayTask, the two tasks that already format floats safely. */
+    created |= xTaskCreate(AlarmTask, "AlarmTask", 512, &alarm_task_params, 2, NULL);
     created |= xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1, NULL);
 
     if (created != pdPASS) {
         UART_Mutex_Printf(&uart_mutex, "[MAIN] FATAL: xTaskCreate failed\r\n");
     }
+
+    /* Instrumentation: the five stacks and their TCBs come out of a fixed
+       12,288-byte heap, so raising AlarmTask's stack must not have quietly
+       starved the others.  Report what is left once every allocation above
+       has been made. */
+    UART_Mutex_Printf(&uart_mutex,
+                      "[MAIN] FreeRTOS heap free after task creation: %u bytes\r\n",
+                      (unsigned)xPortGetFreeHeapSize());
 
     UART_Mutex_Printf(&uart_mutex, "[MAIN] System initialized\r\n");
     UART_Mutex_Printf(&uart_mutex, "[MAIN] Starting FreeRTOS scheduler\r\n");

@@ -105,7 +105,10 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskGetSchedulerState          1
 #define INCLUDE_xTimerPendFunctionCall          0
 #define INCLUDE_xQueueGetMutexHolder            0
-#define INCLUDE_uxTaskGetStackHighWaterMark     0
+/* AlarmTask reports its stack margin at runtime, so the read-only
+   introspection API has to be linked in.  It affects no scheduling or
+   memory behaviour. */
+#define INCLUDE_uxTaskGetStackHighWaterMark     1
 #define INCLUDE_eTaskGetState                   0
 
 /* The patched port (lib/freertos_port_patch/src/port.c) defines the CMSIS-named

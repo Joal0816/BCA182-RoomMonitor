@@ -1,7 +1,9 @@
 #ifndef TASK_H
 #define TASK_H
 #include "FreeRTOS.h"
-typedef struct { void *dummy; } TaskHandle_t;
+/* The real kernel defines TaskHandle_t as a pointer to its TCB; the host stub
+   mirrors that (as void *) so NULL is a valid handle, as call sites assume. */
+typedef void *TaskHandle_t;
 typedef struct {
     const char *pcTaskName;
     void *pxStack;
@@ -16,6 +18,8 @@ void xTaskResumeAll(void);
 uint32_t ulTaskNotifyTake(BaseType_t clear, TickType_t w);
 BaseType_t xTaskNotifyGive(TaskHandle_t t);
 BaseType_t xTaskGetSchedulerState(void);
+/* Introspection API used by AlarmTask's runtime instrumentation. */
+UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t xTask);
 void vTaskNotifyGiveFromISR(TaskHandle_t t, BaseType_t *pxHigherPriorityTaskWoken);
 #define taskSCHEDULER_NOT_STARTED 0
 #define taskSCHEDULER_RUNNING     1

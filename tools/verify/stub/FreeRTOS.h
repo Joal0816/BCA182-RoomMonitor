@@ -24,6 +24,8 @@ void vTaskDelayUntil(TickType_t *prev, TickType_t inc);
 void taskYIELD(void);
 void vApplicationIdleHook(void);
 void vTimerCallback(void *ulTimerID);
+/* Introspection API used by the application's boot-time instrumentation. */
+size_t xPortGetFreeHeapSize(void);
 /* CMSIS intrinsics the driver layer uses */
 #ifndef CMSIS_IRQ_STUBS
 #define CMSIS_IRQ_STUBS
