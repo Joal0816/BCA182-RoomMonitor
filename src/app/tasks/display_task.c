@@ -78,6 +78,22 @@ void DisplayTask(void *pvParameters) {
        consequence of that rather than a separate I2C problem. */
     UART_Mutex_Printf(params->uart_mutex, "[TASK] DisplayTask entered\r\n");
 
+    /* Panel init runs inside the running task -- the proven pattern.  OLED_Init
+       contains HAL_Delay() and every HAL I2C transaction is timed by
+       HAL_GetTick(), neither of which is reliable before the scheduler starts;
+       initialising here is what lets the very first command succeed.  The
+       retained status and ErrorCode are meaningful now, so report them too. */
+    if (OLED_Init(params->oled, params->hi2c) != HAL_OK) {
+        UART_Mutex_Printf(params->uart_mutex,
+                          "[OLED] init failed: no ACK from 0x%02X\r\n",
+                          OLED_I2C_ADDR);
+        UART_Mutex_Printf(params->uart_mutex,
+                          "[OLED] init status=%d ErrorCode=0x%02X (%s)\r\n",
+                          (int)params->oled->last_status,
+                          (unsigned)params->oled->last_error,
+                          OLED_FaultName(params->oled));
+    }
+
     OLED_Clear(params->oled);
     OLED_DrawString(params->oled, 10, 25, "Initializing...", 2);
     if (OLED_Update(params->oled) != HAL_OK) {

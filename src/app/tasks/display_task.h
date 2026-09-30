@@ -9,6 +9,10 @@
 
 typedef struct {
     OLED_t *oled;
+    /* I2C handle for the panel.  OLED_Init() now runs inside DisplayTask (the
+       proven pattern), so the task receives the handle directly instead of
+       main() pre-initialising the panel before the scheduler starts. */
+    I2C_HandleTypeDef *hi2c;
     QueueHandle_t sensor_queue;
     QueueHandle_t display_page_queue;
     EventGroupHandle_t event_group;

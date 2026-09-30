@@ -113,10 +113,11 @@ int main(void) {
     Diag_Init();
     Diag_DumpVectorInfo();
 
-    /* The UART mutex must exist before anything can report a fault.  OLED_Init
-       below reports failures through it, so creating it afterwards leaves the
-       failure path calling xSemaphoreTake(NULL), which trips a FreeRTOS
-       configASSERT and hides the real message. */
+    /* The UART mutex must exist before anything can report a fault.  Tasks
+       report failures through it (DisplayTask reports the OLED init result),
+       so creating it afterwards would leave a failure path calling
+       xSemaphoreTake(NULL), which trips a FreeRTOS configASSERT and hides the
+       real message. */
     UART_Mutex_Init(&uart_mutex, &huart1);
 
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
@@ -129,35 +130,12 @@ int main(void) {
     I2C1_BusProbeAndRecover();
     MX_I2C1_Init();
 
-    /* --- Instrumentation: classify the OLED I2C failure (removable) --------
-       Every SSD1306 transaction fails on the current board, but the existing
-       message prints for any non-HAL_OK result, so a NACK is indistinguishable
-       from a timeout or a stuck bus.  Print the retained HAL status and
-       ErrorCode decoded to a word, then probe the address once with
-       HAL_I2C_IsDeviceReady() for a binary ACK/NAK answer; the line levels the
-       probe above already reported bracket the init.  This block exists only
-       to classify the fault and can be removed once it is understood. */
-    /* Report the I2C result: a panel that never ACKs is otherwise
-       indistinguishable from a panel that is present but not being drawn to. */
-    HAL_StatusTypeDef oled_status = OLED_Init(&oled, &hi2c1);
-    if (oled_status != HAL_OK) {
-        UART_Mutex_Printf(&uart_mutex, "[OLED] init failed: no ACK from 0x%02X\r\n",
-                          OLED_I2C_ADDR);
-    }
-
-    UART_Mutex_Printf(&uart_mutex,
-                      "[OLED] bus after init: SCL(PB6)=%u SDA(PB7)=%u\r\n",
-                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6),
-                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7));
-    UART_Mutex_Printf(&uart_mutex,
-                      "[OLED] init status=%d ErrorCode=0x%02X (%s)\r\n",
-                      (int)oled_status, (unsigned)oled.last_error,
-                      OLED_FaultName(&oled));
-    UART_Mutex_Printf(&uart_mutex,
-                      "[OLED] probe 0x%02X: %s\r\n",
-                      OLED_I2C_ADDR,
-                      (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1), 1U, 50U) == HAL_OK)
-                          ? "address ACKs" : "address does not ACK");
+    /* The SSD1306 panel is initialised by DisplayTask once the scheduler is
+       running.  OLED_Init() contains HAL_Delay(100) and every I2C transaction
+       is timed by HAL_GetTick(), neither of which is reliable before
+       vTaskStartScheduler(), so running it here made the very first command
+       fail.  Only the I2C1 peripheral and the PB6/PB7 pins are set up here
+       (MX_I2C1_Init / HAL_I2C_MspInit). */
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
 
@@ -191,6 +169,7 @@ int main(void) {
     alarm_task_params.uart_mutex = &uart_mutex;
 
     display_task_params.oled = &oled;
+    display_task_params.hi2c = &hi2c1;
     display_task_params.sensor_queue = display_sensor_queue;
     display_task_params.display_page_queue = display_page_queue;
     display_task_params.state_machine = &state_machine;

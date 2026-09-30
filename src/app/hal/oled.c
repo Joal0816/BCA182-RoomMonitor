@@ -84,29 +84,37 @@ HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
         return status;
     }
 
-    /* Send entire frame buffer in ONE I2C transaction:
-     * [0x40][pixel0][pixel1]...[pixel1023]
-     * This avoids 1024 separate I2C transactions which is far too slow
-     * and causes Wokwi's I2C simulation to time out. */
-    static uint8_t tx_buf[1 + OLED_WIDTH * OLED_HEIGHT / 8];
-    tx_buf[0] = 0x40; /* Co=0, D/C#=1 — data stream */
-    for (int i = 0; i < (int)sizeof(oled->buffer); i++) {
-        tx_buf[1 + i] = oled->buffer[i];
-    }
-    /* Instrumentation: fresh ErrorCode, as in OLED_SendCommand. */
-    oled->hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
-    HAL_StatusTypeDef tx = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
-                                                   tx_buf, sizeof(tx_buf),
-                                                   OLED_I2C_TIMEOUT_MS);
-    if (tx != HAL_OK) {
-        /* Instrumentation: keep the HAL reason behind the failure, and keep
-           the real status rather than flattening it to HAL_ERROR. */
-        oled->last_error = oled->hi2c->ErrorCode;
-        status = tx;
+    /* Stream the frame buffer in page-sized chunks.  A single 1025-byte
+       transaction needs ~92 ms at 100 kHz, longer than the per-transaction
+       timeout, so every frame failed; one 129-byte page chunk (~12 ms) fits
+       well inside the budget.  Each chunk is [0x40][128 pixels], where 0x40
+       sets Co=0, D/C#=1 for a data stream. */
+    static uint8_t chunk[1 + OLED_WIDTH];
+    chunk[0] = 0x40;
+    for (uint32_t page = 0; page < (OLED_HEIGHT / 8U); page++) {
+        for (uint32_t i = 0; i < OLED_WIDTH; i++) {
+            chunk[1 + i] = oled->buffer[page * OLED_WIDTH + i];
+        }
+        /* Instrumentation: fresh ErrorCode before each chunk, as in
+           OLED_SendCommand, so a bit left over from an earlier chunk cannot
+           mislabel this one. */
+        oled->hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
+        HAL_StatusTypeDef tx = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                                                       chunk, sizeof(chunk),
+                                                       OLED_I2C_TIMEOUT_MS);
+        if (tx != HAL_OK) {
+            /* Instrumentation: latch the first failing chunk's HAL reason and
+               keep the real status rather than flattening it to HAL_ERROR, so
+               the caller can still tell a NACK from a timeout from a stuck
+               bus -- matching the window path above. */
+            oled->last_error = oled->hi2c->ErrorCode;
+            oled->last_status = tx;
+            return tx;
+        }
     }
 
-    oled->last_status = status;
-    return status;
+    oled->last_status = HAL_OK;
+    return HAL_OK;
 }
 
 void OLED_SetPixel(OLED_t *oled, uint8_t x, uint8_t y, uint8_t color) {
