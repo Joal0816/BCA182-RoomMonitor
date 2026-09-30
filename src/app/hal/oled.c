@@ -3,6 +3,11 @@
 
 static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
+    /* Instrumentation: start from a clean ErrorCode.  HAL_BUSY and the bare
+       HAL_TIMEOUT paths can return without touching it, so without this the
+       latch below could capture a bit left over from an earlier transaction and
+       mislabel the fault. */
+    oled->hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
     HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
                                                        data, 2, OLED_I2C_TIMEOUT_MS);
     if (status != HAL_OK) {
@@ -88,6 +93,8 @@ HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
     for (int i = 0; i < (int)sizeof(oled->buffer); i++) {
         tx_buf[1 + i] = oled->buffer[i];
     }
+    /* Instrumentation: fresh ErrorCode, as in OLED_SendCommand. */
+    oled->hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
     HAL_StatusTypeDef tx = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
                                                    tx_buf, sizeof(tx_buf),
                                                    OLED_I2C_TIMEOUT_MS);

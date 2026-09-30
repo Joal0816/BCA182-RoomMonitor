@@ -61,7 +61,7 @@ static void DrawMotionPage(OLED_t *oled, SensorData_t *data) {
    boot path prints.  Removable once the bus fault is understood. */
 static void ReportFrameFailure(DisplayTaskParams_t *params) {
     UART_Mutex_Printf(params->uart_mutex,
-                      "[OLED] frame transfer failed (panel not ACKing): status=%d ErrorCode=0x%02X (%s)\r\n",
+                      "[OLED] frame transfer failed: status=%d ErrorCode=0x%02X (%s)\r\n",
                       (int)params->oled->last_status,
                       (unsigned)params->oled->last_error,
                       OLED_FaultName(params->oled));

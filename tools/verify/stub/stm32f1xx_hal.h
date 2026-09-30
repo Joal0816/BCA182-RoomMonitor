@@ -113,6 +113,7 @@ typedef enum { GPIO_PinState_RESET = 0, GPIO_PinState_SET = 1 } GPIO_PinState;
 #define FLASH_LATENCY_2 2U
 #define HAL_MAX_DELAY 0xFFFFFFFFU
 /* HAL I2C ErrorCode bits (stm32f1xx_hal_i2c.h). */
+#define HAL_I2C_ERROR_NONE    0x00000000U
 #define HAL_I2C_ERROR_AF      0x00000004U
 #define HAL_I2C_ERROR_TIMEOUT 0x00000020U
 
