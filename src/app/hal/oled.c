@@ -187,24 +187,25 @@ void OLED_DrawProgressBar(OLED_t *oled, uint8_t x, uint8_t y, uint8_t w, uint8_t
 }
 
 /* Instrumentation, not production behaviour: reduce the retained HAL status and
-   ErrorCode to the one word that says which failure this was.  The ErrorCode bit
-   alone is ambiguous -- a stuck BUSY flag and an address timeout both set
-   HAL_I2C_ERROR_TIMEOUT -- so the HAL status discriminates them first. */
+   ErrorCode to the one word that says which failure this was.  Status is tested
+   before the ErrorCode bits because the F1 HAL can return HAL_BUSY without
+   touching ErrorCode at all, leaving a stale AF bit from an earlier transaction
+   that would otherwise be reported as a NACK. */
 const char *OLED_FaultName(const OLED_t *oled) {
     if (oled->last_status == HAL_OK) {
         return "ok";
     }
-    if ((oled->last_error & HAL_I2C_ERROR_AF) != 0U) {
-        return "NACK";
-    }
     if (oled->last_status == HAL_BUSY) {
         return "busy";
     }
-    if (oled->last_status == HAL_TIMEOUT) {
-        return "start";
+    if ((oled->last_error & HAL_I2C_ERROR_AF) != 0U) {
+        return "NACK";
     }
     if ((oled->last_error & HAL_I2C_ERROR_TIMEOUT) != 0U) {
         return "timeout";
+    }
+    if (oled->last_status == HAL_TIMEOUT) {
+        return "start";
     }
     return "error";
 }
