@@ -412,8 +412,10 @@ static void I2C1_BusProbeAndRecover(void) {
 
     /* Verdict, so a still-dead bus is not distinguishable only by reading two
        raw levels: the later failure-classification output can be read against
-       this line.  A healthy bus returns here; the pins stay open-drain with
-       both lines released, and HAL_I2C_MspInit() makes them AF_OD later. */
+       this line.  A healthy bus returns here with the pins left as released
+       inputs; HAL_I2C_MspInit() makes them AF_OD later.  Every exit leaves
+       ODR=1, which the F1 needs when entering AF_OD -- with ODR=0 the I2C
+       lines would come up actively driven low. */
     if ((scl != 0U) && (sda != 0U)) {
         UART_Mutex_Printf(&uart_mutex, "[OLED] bus recovery succeeded\r\n");
         return;
@@ -433,8 +435,11 @@ static void I2C1_BusProbeAndRecover(void) {
 
        Push-pull against a line a slave is still holding is contention; 1 ms is
        survivable here and harmless in Wokwi, but on real hardware shorten the
-       assertion or fit a series resistor. */
+       assertion or fit a series resistor.  Speed is set explicitly so this
+       block's contention stays what the comment says it is. */
     probe.Mode = GPIO_MODE_OUTPUT_PP;
+    probe.Pull = GPIO_NOPULL;
+    probe.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &probe);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
