@@ -65,6 +65,7 @@ static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
+static void I2C1_BusProbeAndRecover(void);
 
 static DHT22_t dht22;
 static LDR_t ldr;
@@ -99,7 +100,6 @@ int main(void) {
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
-    MX_I2C1_Init();
     MX_ADC1_Init();
     MX_TIM4_Init();
     MX_USART1_UART_Init();
@@ -122,20 +122,21 @@ int main(void) {
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
+    /* Probe the bus and recover it if a slave is holding a line low, then
+       bring I2C1 up from a clean state.  The init is deferred to here rather
+       than the top of main() because the probe reports through the UART mutex,
+       which does not exist yet at that point. */
+    I2C1_BusProbeAndRecover();
+    MX_I2C1_Init();
+
     /* --- Instrumentation: classify the OLED I2C failure (removable) --------
        Every SSD1306 transaction fails on the current board, but the existing
        message prints for any non-HAL_OK result, so a NACK is indistinguishable
-       from a timeout or a stuck bus.  Read the PB6/PB7 line levels around the
-       init (SCL is PB6, SDA is PB7) to see whether the bus is stuck low, print
-       the retained HAL status and ErrorCode decoded to a word, then probe the
-       address once with HAL_I2C_IsDeviceReady() for a binary ACK/NAK answer.
-       This block exists only to classify the fault and can be removed once it
-       is understood. */
-    UART_Mutex_Printf(&uart_mutex,
-                      "[OLED] bus before init: SCL(PB6)=%u SDA(PB7)=%u\r\n",
-                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6),
-                      (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7));
-
+       from a timeout or a stuck bus.  Print the retained HAL status and
+       ErrorCode decoded to a word, then probe the address once with
+       HAL_I2C_IsDeviceReady() for a binary ACK/NAK answer; the line levels the
+       probe above already reported bracket the init.  This block exists only
+       to classify the fault and can be removed once it is understood. */
     /* Report the I2C result: a panel that never ACKs is otherwise
        indistinguishable from a panel that is present but not being drawn to. */
     HAL_StatusTypeDef oled_status = OLED_Init(&oled, &hi2c1);
@@ -315,6 +316,88 @@ static void MX_GPIO_Init(void) {
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 }
 
+/* Probe the I2C1 bus and recover it if a stuck slave is holding a line low.
+ *
+ * Runs before MX_I2C1_Init(), while PB6/PB7 are still plain GPIO, so the pull
+ * configuration is actually honoured: the STM32F1 HAL ignores the Pull field
+ * for GPIO_MODE_AF_OD (see ST's stm32f1xx_hal_gpio.c), so an AF-mode read is
+ * not a trustworthy view of the pads.  An input with a pull-up is.  SCL is
+ * PB6, SDA is PB7.
+ *
+ * If a slave missed a STOP and is still driving SDA low, the bus is dead for
+ * every later transfer.  The standard recovery is to clock SCL nine times to
+ * walk that slave through the rest of its byte -- after which it must release
+ * SDA -- and then issue a STOP.  The known-good Wokwi reference for this board
+ * and pinout does the same before bringing the peripheral up.
+ *
+ * The pins are deliberately left as GPIO, in whatever mode this function last
+ * set them: HAL_I2C_MspInit() reconfigures them as AF_OD from inside
+ * HAL_I2C_Init(), so there is nothing to restore here. */
+static void I2C1_BusProbeAndRecover(void) {
+    GPIO_InitTypeDef probe = {0};
+    unsigned scl;
+    unsigned sda;
+    int i;
+
+    /* GPIOB and AFIO must be clocked before anything touches the pins; the
+       HAL clock macros are idempotent, so repeating them is harmless. */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_AFIO_CLK_ENABLE();
+
+    /* Input with pull-up: the only mode on the F1 where the pull setting is
+       applied, and therefore the reliable way to read the actual line levels. */
+    probe.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    probe.Mode = GPIO_MODE_INPUT;
+    probe.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &probe);
+
+    scl = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6);
+    sda = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7);
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] bus before init: SCL(PB6)=%u SDA(PB7)=%u\r\n",
+                      scl, sda);
+
+    if ((scl != 0U) && (sda != 0U)) {
+        UART_Mutex_Printf(&uart_mutex, "[OLED] bus idle, recovery skipped\r\n");
+        return;
+    }
+
+    /* Open-drain outputs: the external 4.7k pull-ups set the high level, and a
+       low is only ever asserted by pulling the line down, so this cannot fight
+       a slave that is still driving. */
+    probe.Mode = GPIO_MODE_OUTPUT_OD;
+    probe.Pull = GPIO_NOPULL;
+    probe.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &probe);
+
+    /* Release SDA and let the pull-ups settle both lines high. */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+
+    /* Nine SCL pulses with SDA free: enough to finish any partial byte the
+       slave is holding, after which it must let SDA go. */
+    for (i = 0; i < 9; i++) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+        HAL_Delay(1);
+    }
+
+    /* STOP: SDA driven low while SCL is high, then released high while SCL
+       stays high.  HAL_Delay() works here: the FreeRTOS port advances the HAL
+       tick from its tick hook even before the scheduler starts. */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+
+    scl = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6);
+    sda = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7);
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] bus after recovery: SCL(PB6)=%u SDA(PB7)=%u\r\n",
+                      scl, sda);
+}
+
 static void MX_I2C1_Init(void) {
     hi2c1.Instance = I2C1;
     hi2c1.Init.ClockSpeed = 100000;
@@ -325,6 +408,14 @@ static void MX_I2C1_Init(void) {
     hi2c1.Init.OwnAddress2 = 0;
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    /* Mirror the known-good STM32duino bring-up sequence: its i2c_init() clocks
+       AFIO, forces and releases the I2C1 reset, then marks the handle reset
+       before HAL_I2C_Init(), so the peripheral starts from a clean state rather
+       than whatever a previous owner (or the simulator) left behind. */
+    __HAL_RCC_AFIO_CLK_ENABLE();
+    __HAL_RCC_I2C1_FORCE_RESET();
+    __HAL_RCC_I2C1_RELEASE_RESET();
+    hi2c1.State = HAL_I2C_STATE_RESET;
     if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
         Error_Handler();
     }
@@ -395,7 +486,9 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c) {
         __HAL_RCC_GPIOB_CLK_ENABLE();
         GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-        GPIO_InitStruct.Pull = GPIO_PULLUP;
+        /* The F1 HAL ignores Pull for GPIO_MODE_AF_OD; the external 4.7 kOhm
+           pull-ups are what hold the bus high. */
+        GPIO_InitStruct.Pull = GPIO_NOPULL;
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     }
