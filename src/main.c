@@ -396,6 +396,14 @@ static void I2C1_BusProbeAndRecover(void) {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
     HAL_Delay(1);
 
+    /* Read back in the same mode as the opening probe.  An open-drain output
+       with the latch high is released, but configured with no pull-up here it
+       would only reflect whatever else holds the line, so the two reads would
+       not be comparable. */
+    probe.Mode = GPIO_MODE_INPUT;
+    probe.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &probe);
+
     scl = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6);
     sda = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7);
     UART_Mutex_Printf(&uart_mutex,
@@ -415,16 +423,17 @@ static void I2C1_BusProbeAndRecover(void) {
     /* Instrumentation, still-low path only.  The input reads above prove a line
        is low, not why, so drive both pads push-pull high and read them back.
        A 1 means the pad drove the line high -- nothing was holding it low at
-       that instant, so the earlier low reading means nothing was pulling it
-       high (e.g. the model does not implement the pull-ups).  A 0 means the
-       line stays low even against a full push-pull drive: either something
-       external holds it or the pad itself is stuck, and this test cannot tell
-       those apart.  Remove once the fault is understood.
+       that instant.  A 0 means the line stays low even against a full push-pull
+       drive: either something external holds it or the pad itself is stuck, and
+       this test cannot tell those apart.  Note that the opening and
+       post-recovery reads were taken with the internal pull-up enabled, so a 0
+       there already means something is driving the line or the model does not
+       implement the pull-ups; a missing external pull-up alone would not do it.
+       Remove once the fault is understood.
 
        Push-pull against a line a slave is still holding is contention; 1 ms is
        survivable here and harmless in Wokwi, but on real hardware shorten the
-       assertion or fit a series resistor.  The pins are left as GPIO and
-       HAL_I2C_MspInit() reconfigures them as AF_OD. */
+       assertion or fit a series resistor. */
     probe.Mode = GPIO_MODE_OUTPUT_PP;
     HAL_GPIO_Init(GPIOB, &probe);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
@@ -435,6 +444,14 @@ static void I2C1_BusProbeAndRecover(void) {
     UART_Mutex_Printf(&uart_mutex,
                       "[OLED] drive test: SCL(PB6)=%u SDA(PB7)=%u\r\n",
                       scl, sda);
+
+    /* Release the pads again before returning.  If HAL_I2C_Init() then fails and
+       Error_Handler() traps, push-pull outputs left driving into a held line
+       would source current indefinitely.  HAL_I2C_MspInit() makes them AF_OD
+       when the peripheral is brought up. */
+    probe.Mode = GPIO_MODE_INPUT;
+    probe.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &probe);
 }
 
 static void MX_I2C1_Init(void) {
