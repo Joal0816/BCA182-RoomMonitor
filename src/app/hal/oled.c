@@ -5,11 +5,11 @@ static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
     HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
                                                        data, 2, OLED_I2C_TIMEOUT_MS);
-    if (status != HAL_OK && oled->last_error == 0U) {
-        /* Instrumentation: latch the FIRST failure of the operation.  Every
-           later command in the same sequence fails the same way, and
-           overwriting would replace the reason that actually explains the
-           fault. */
+    if (status != HAL_OK) {
+        /* Instrumentation: latch this operation's first failure.  Both callers
+           bail on the first failure, so at most one lands per operation -- and
+           they clear the field before starting.  Latching unconditionally keeps
+           this in step with the frame-transfer path below. */
         oled->last_error = oled->hi2c->ErrorCode;
     }
     return status;
