@@ -5,8 +5,11 @@ static HAL_StatusTypeDef OLED_SendCommand(OLED_t *oled, uint8_t cmd) {
     uint8_t data[2] = {0x00, cmd};
     HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
                                                        data, 2, OLED_I2C_TIMEOUT_MS);
-    if (status != HAL_OK) {
-        /* Instrumentation: keep the HAL reason behind the failure. */
+    if (status != HAL_OK && oled->last_error == 0U) {
+        /* Instrumentation: latch the FIRST failure of the operation.  Every
+           later command in the same sequence fails the same way, and
+           overwriting would replace the reason that actually explains the
+           fault. */
         oled->last_error = oled->hi2c->ErrorCode;
     }
     return status;
@@ -51,14 +54,25 @@ void OLED_Clear(OLED_t *oled) {
 }
 
 HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
+    /* Instrumentation: report this operation's first failure, not one left
+       over from an earlier refresh. */
+    oled->last_error = 0;
+
     /* Set column and page address window to full screen.  Bail out on the
-       first failure so a dead panel costs one timeout, not six. */
-    HAL_StatusTypeDef status = OLED_SendCommand(oled, 0x21);
-    status = (OLED_SendCommand(oled, 0) != HAL_OK) ? HAL_ERROR : status;
-    status = (OLED_SendCommand(oled, OLED_WIDTH - 1) != HAL_OK) ? HAL_ERROR : status;
-    status = (OLED_SendCommand(oled, 0x22) != HAL_OK) ? HAL_ERROR : status;
-    status = (OLED_SendCommand(oled, 0) != HAL_OK) ? HAL_ERROR : status;
-    status = (OLED_SendCommand(oled, (OLED_HEIGHT / 8) - 1) != HAL_OK) ? HAL_ERROR : status;
+       first failure so a dead panel costs one timeout, not six -- and keep the
+       real HAL status instead of collapsing it to HAL_ERROR, so the caller can
+       still tell a NACK from a timeout from a stuck bus. */
+    static const uint8_t window_cmds[] = {
+        0x21, 0, OLED_WIDTH - 1, 0x22, 0, (OLED_HEIGHT / 8) - 1,
+    };
+    HAL_StatusTypeDef status = HAL_OK;
+    for (uint32_t i = 0; i < sizeof(window_cmds); i++) {
+        HAL_StatusTypeDef s = OLED_SendCommand(oled, window_cmds[i]);
+        if (s != HAL_OK) {
+            status = s;
+            break;
+        }
+    }
 
     if (status != HAL_OK) {
         oled->last_status = status;
@@ -74,11 +88,14 @@ HAL_StatusTypeDef OLED_Update(OLED_t *oled) {
     for (int i = 0; i < (int)sizeof(oled->buffer); i++) {
         tx_buf[1 + i] = oled->buffer[i];
     }
-    if (HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
-                                tx_buf, sizeof(tx_buf), OLED_I2C_TIMEOUT_MS) != HAL_OK) {
-        /* Instrumentation: keep the HAL reason behind the failure. */
+    HAL_StatusTypeDef tx = HAL_I2C_Master_Transmit(oled->hi2c, OLED_I2C_ADDR << 1,
+                                                   tx_buf, sizeof(tx_buf),
+                                                   OLED_I2C_TIMEOUT_MS);
+    if (tx != HAL_OK) {
+        /* Instrumentation: keep the HAL reason behind the failure, and keep
+           the real status rather than flattening it to HAL_ERROR. */
         oled->last_error = oled->hi2c->ErrorCode;
-        status = HAL_ERROR;
+        status = tx;
     }
 
     oled->last_status = status;

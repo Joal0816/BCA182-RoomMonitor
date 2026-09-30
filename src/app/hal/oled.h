@@ -23,12 +23,13 @@ typedef struct {
        "OLED not on the bus", because HAL_I2C_Master_Transmit's status was
        previously discarded. */
     HAL_StatusTypeDef last_status;
-    /* Instrumentation: the HAL I2C ErrorCode from the most recent failed
-       transaction.  last_status alone cannot separate an address NACK from a
-       timeout from a stuck BUSY flag -- the HAL reports those with the same
-       HAL_ERROR or HAL_BUSY status -- so the code is retained for the boot-time
-       classification and for the recurring display failure.  It is reset to 0
-       when a fresh init sequence starts. */
+    /* Instrumentation: the HAL I2C ErrorCode from the first failed transaction
+       of the most recent operation.  last_status alone cannot separate an
+       address NACK from a timeout from a stuck BUSY flag -- the HAL reports
+       those with the same HAL_ERROR or HAL_BUSY status -- so the code is
+       retained for the boot-time classification and for the recurring display
+       failure.  It is cleared when a fresh init sequence or frame update
+       starts. */
     uint32_t last_error;
 } OLED_t;
 
