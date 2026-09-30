@@ -370,7 +370,10 @@ static void I2C1_BusProbeAndRecover(void) {
     probe.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &probe);
 
-    /* Release SDA and let the pull-ups settle both lines high. */
+    /* Release both lines and let the pull-ups settle them high.  SCL's output
+       latch is still 0 from reset, so it must be written high explicitly or
+       the line stays actively driven low for the whole settle delay. */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
     HAL_Delay(1);
 
@@ -383,9 +386,11 @@ static void I2C1_BusProbeAndRecover(void) {
         HAL_Delay(1);
     }
 
-    /* STOP: SDA driven low while SCL is high, then released high while SCL
-       stays high.  HAL_Delay() works here: the FreeRTOS port advances the HAL
-       tick from its tick hook even before the scheduler starts. */
+    /* A START followed by a STOP: SDA driven low while SCL is high (START),
+       then released high while SCL stays high (STOP).  Together that is the
+       NXP AN10216 bus-clear sequence.  HAL_Delay() works here: the FreeRTOS
+       port advances the HAL tick from its tick hook even before the scheduler
+       starts. */
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
     HAL_Delay(1);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
@@ -395,6 +400,32 @@ static void I2C1_BusProbeAndRecover(void) {
     sda = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7);
     UART_Mutex_Printf(&uart_mutex,
                       "[OLED] bus after recovery: SCL(PB6)=%u SDA(PB7)=%u\r\n",
+                      scl, sda);
+
+    /* Verdict, so a still-dead bus is not distinguishable only by reading two
+       raw levels: the later failure-classification output can be read against
+       this line. */
+    if ((scl != 0U) && (sda != 0U)) {
+        UART_Mutex_Printf(&uart_mutex, "[OLED] bus recovery succeeded\r\n");
+    } else {
+        UART_Mutex_Printf(&uart_mutex, "[OLED] BUS FAULT: lines still low after recovery\r\n");
+    }
+
+    /* Instrumentation: the input reads above only prove a line is low, not why.
+       Drive both pads push-pull high and read them back -- a 1 means the pad
+       can drive and something external is holding the line down (or the model
+       has no pull-up), while a 0 means the pad itself is stuck.  Remove once
+       the fault is understood.  The pins are left as GPIO; the
+       HAL_I2C_MspInit() inside HAL_I2C_Init() reconfigures them as AF_OD. */
+    probe.Mode = GPIO_MODE_OUTPUT_PP;
+    HAL_GPIO_Init(GPIOB, &probe);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+    scl = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6);
+    sda = (unsigned)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7);
+    UART_Mutex_Printf(&uart_mutex,
+                      "[OLED] drive test: SCL(PB6)=%u SDA(PB7)=%u\r\n",
                       scl, sda);
 }
 
@@ -409,12 +440,20 @@ static void MX_I2C1_Init(void) {
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
     /* Mirror the known-good STM32duino bring-up sequence: its i2c_init() clocks
-       AFIO, forces and releases the I2C1 reset, then marks the handle reset
-       before HAL_I2C_Init(), so the peripheral starts from a clean state rather
-       than whatever a previous owner (or the simulator) left behind. */
+       the peripheral before forcing and releasing its reset, then marks the
+       handle reset before HAL_I2C_Init(), so the peripheral starts from a clean
+       state rather than whatever a previous owner (or the simulator) left
+       behind.  __HAL_RCC_I2C1_CLK_ENABLE() repeats the one in HAL_I2C_MspInit()
+       and is idempotent. */
+    __HAL_RCC_I2C1_CLK_ENABLE();
     __HAL_RCC_AFIO_CLK_ENABLE();
     __HAL_RCC_I2C1_FORCE_RESET();
     __HAL_RCC_I2C1_RELEASE_RESET();
+    /* The probe above deliberately leaves PB6/PB7 as plain GPIO; they become
+       AF_OD again only because this State forces HAL_I2C_Init() to re-run
+       HAL_I2C_MspInit().  A future re-init path that reaches HAL_I2C_Init()
+       with State == READY would skip MspInit, leave the bus as GPIO, and
+       silently kill every transfer. */
     hi2c1.State = HAL_I2C_STATE_RESET;
     if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
         Error_Handler();
