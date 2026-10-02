@@ -54,7 +54,6 @@ void DHT22_Init(DHT22_t *dht, GPIO_TypeDef *port, uint16_t pin) {
 
     DHT22_SetOutput(dht);
     HAL_GPIO_WritePin(dht->port, dht->pin, GPIO_PIN_SET);
-    DHT22_Delay_us(2000000);
 }
 
 uint8_t DHT22_Read(DHT22_t *dht) {

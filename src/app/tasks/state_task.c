@@ -13,6 +13,9 @@
  */
 void StateTask(void *pvParameters) {
     StateTaskParams_t *params = (StateTaskParams_t *)pvParameters;
+    static const char started[] = "[STATE] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
 
     for (;;) {
         EventBits_t bits = xEventGroupWaitBits(params->event_group,

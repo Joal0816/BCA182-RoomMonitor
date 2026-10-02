@@ -73,6 +73,9 @@ void DisplayTask(void *pvParameters) {
     uint8_t blanked = 0;
     TickType_t last_retry_log = 0;
 
+    static const char started[] = "[DISPLAY] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
     UART_Mutex_Printf(params->uart_mutex, "[DISPLAY] Task started\r\n");
 
     if (!params->oled->ready) {

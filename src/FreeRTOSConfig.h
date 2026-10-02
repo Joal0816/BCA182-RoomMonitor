@@ -47,9 +47,9 @@
 #define configTASK_NOTIFICATION_ARRAY_ENTRIES  1
 
 /* Memory allocation */
-#define configSUPPORT_STATIC_ALLOCATION         0
+#define configSUPPORT_STATIC_ALLOCATION         1
 #define configSUPPORT_DYNAMIC_ALLOCATION        1
-#define configTOTAL_HEAP_SIZE                   ((size_t)(15 * 1024))
+#define configTOTAL_HEAP_SIZE                   ((size_t)(4 * 1024))
 #define configAPPLICATION_ALLOCATED_HEAP        0
 
 /* Hook functions */
@@ -82,10 +82,7 @@
 #define configMAX_CO_ROUTINE_PRIORITIES         2
 
 /* Software timer definitions. */
-#define configUSE_TIMERS                        1
-#define configTIMER_TASK_PRIORITY               3
-#define configTIMER_QUEUE_LENGTH                10
-#define configTIMER_TASK_STACK_DEPTH            256
+#define configUSE_TIMERS                        0
 
 /* Set the following definitions to 1 to include the API function, or zero
    to exclude the API function. */
@@ -108,6 +105,11 @@
 #define xPortPendSVHandler PendSV_Handler
 
 /* Assert */
-#define configASSERT(x) if((x) == 0) { taskDISABLE_INTERRUPTS(); for(;;); }
+extern void vApplicationAssertHook(const char *file, unsigned long line);
+#define configASSERT(x) do { \
+    if ((x) == 0) { \
+        vApplicationAssertHook(__FILE__, (unsigned long)__LINE__); \
+    } \
+} while (0)
 
 #endif /* FREERTOS_CONFIG_H */

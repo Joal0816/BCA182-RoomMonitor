@@ -11,6 +11,9 @@
 void InputTask(void *pvParameters) {
     InputTaskParams_t *params = (InputTaskParams_t *)pvParameters;
     DisplayPage_t current_page = PAGE_TEMPERATURE;
+    static const char started[] = "[INPUT] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
 
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);

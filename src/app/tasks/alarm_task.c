@@ -8,6 +8,9 @@
 void AlarmTask(void *pvParameters) {
     AlarmTaskParams_t *params = (AlarmTaskParams_t *)pvParameters;
     SensorData_t data;
+    static const char started[] = "[ALARM] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
 
     for (;;) {
         if (xQueueReceive(params->alarm_queue, &data, pdMS_TO_TICKS(ALARM_CHECK_PERIOD_MS)) == pdPASS) {

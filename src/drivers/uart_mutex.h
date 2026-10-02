@@ -6,9 +6,11 @@
 typedef struct {
     UART_HandleTypeDef *huart;
     SemaphoreHandle_t mutex;
+    StaticSemaphore_t mutex_storage;
 } UART_Mutex_t;
 
 void UART_Mutex_Init(UART_Mutex_t *uart_mutex, UART_HandleTypeDef *huart);
+void UART_Mutex_RawSend(UART_Mutex_t *uart_mutex, const uint8_t *data, uint16_t size);
 void UART_Mutex_Printf(UART_Mutex_t *uart_mutex, const char *format, ...);
 void UART_Mutex_Send(UART_Mutex_t *uart_mutex, const uint8_t *data, uint16_t size);
 

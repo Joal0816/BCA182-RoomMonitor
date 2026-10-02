@@ -12,6 +12,9 @@
 void MotionTask(void *pvParameters) {
     MotionTaskParams_t *params = (MotionTaskParams_t *)pvParameters;
     uint8_t last_reported = 0;
+    static const char started[] = "[MOTION] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
 
     xEventGroupSetBits(params->event_group, EVENT_MOTION_BIT); /* assume motion present at boot for fast ACTIVE */
 

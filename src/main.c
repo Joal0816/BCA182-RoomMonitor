@@ -1,4 +1,6 @@
 #include "main.h"
+#include <string.h>
+#include <stdio.h>
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -51,6 +53,17 @@ static QueueHandle_t display_queue;
 static QueueHandle_t display_page_queue;
 static EventGroupHandle_t event_group;
 
+static StaticQueue_t alarm_queue_storage;
+static StaticQueue_t display_queue_storage;
+static StaticQueue_t display_page_queue_storage;
+static StaticEventGroup_t event_group_storage;
+static uint8_t alarm_queue_buffer[5 * sizeof(SensorData_t)]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static uint8_t display_queue_buffer[5 * sizeof(SensorData_t)]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static uint8_t display_page_queue_buffer[sizeof(DisplayPage_t)]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+
 static InputTaskParams_t input_task_params;
 static MotionTaskParams_t motion_task_params;
 static SensorTaskParams_t sensor_task_params;
@@ -58,10 +71,100 @@ static AlarmTaskParams_t alarm_task_params;
 static DisplayTaskParams_t display_task_params;
 static StateTaskParams_t state_task_params;
 
+static StaticTask_t input_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t motion_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t sensor_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t alarm_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t state_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t display_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StaticTask_t idle_task_storage
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t input_task_stack[256]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t motion_task_stack[256]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t sensor_task_stack[512]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t alarm_task_stack[256]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t state_task_stack[256]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t display_task_stack[384]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t idle_task_stack[configMINIMAL_STACK_SIZE]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+
 static I2C_HandleTypeDef hi2c1;
 static ADC_HandleTypeDef hadc1;
 static TIM_HandleTypeDef htim4;
 static UART_HandleTypeDef huart1;
+
+static void FatalUartWrite(const uint8_t *data, uint16_t size) {
+    for (uint16_t i = 0; i < size; i++) {
+        uint32_t guard = 100000U;
+        while (((USART1->SR & USART_SR_TXE) == 0U) && (guard-- > 0U)) {
+        }
+        USART1->DR = data[i];
+    }
+}
+
+static void BootLog(const char *message) {
+    HAL_UART_Transmit(&huart1, (uint8_t *)message, strlen(message), 100);
+}
+
+void vApplicationGetIdleTaskMemory(StaticTask_t **task_buffer,
+                                   StackType_t **stack_buffer,
+                                   configSTACK_DEPTH_TYPE *stack_size) {
+    *task_buffer = &idle_task_storage;
+    *stack_buffer = idle_task_stack;
+    *stack_size = configMINIMAL_STACK_SIZE;
+}
+
+static void BootLogSchedulerVectors(void) {
+    const uint32_t *vectors = (const uint32_t *)SCB->VTOR;
+    char message[160];
+    int length = snprintf(
+        message, sizeof(message),
+        "[BOOT] RTOS vectors VTOR=0x%08lX SVC=0x%08lX PendSV=0x%08lX\r\n"
+        "[BOOT] RTOS priority AIRCR=0x%08lX SHPR2=0x%08lX SHPR3=0x%08lX\r\n",
+        (unsigned long)SCB->VTOR,
+        (unsigned long)vectors[SVCall_IRQn + 16],
+        (unsigned long)vectors[PendSV_IRQn + 16],
+        (unsigned long)SCB->AIRCR,
+        (unsigned long)SCB->SHP[1],
+        (unsigned long)SCB->SHP[2]);
+    if (length > 0) {
+        uint16_t size = (length < (int)sizeof(message))
+                            ? (uint16_t)length
+                            : (uint16_t)(sizeof(message) - 1U);
+        FatalUartWrite((const uint8_t *)message, size);
+    }
+}
+
+static void BootLogResetCause(void) {
+    uint32_t reset_flags = RCC->CSR;
+
+    if (reset_flags & RCC_CSR_IWDGRSTF) {
+        BootLog("[BOOT] Reset cause: independent watchdog\r\n");
+    } else if (reset_flags & RCC_CSR_WWDGRSTF) {
+        BootLog("[BOOT] Reset cause: window watchdog\r\n");
+    } else if (reset_flags & RCC_CSR_SFTRSTF) {
+        BootLog("[BOOT] Reset cause: software reset\r\n");
+    } else if (reset_flags & RCC_CSR_PINRSTF) {
+        BootLog("[BOOT] Reset cause: pin reset\r\n");
+    } else if (reset_flags & RCC_CSR_PORRSTF) {
+        BootLog("[BOOT] Reset cause: power-on reset\r\n");
+    } else {
+        BootLog("[BOOT] Reset cause: unknown\r\n");
+    }
+    __HAL_RCC_CLEAR_RESET_FLAGS();
+}
 
 int app_main(void) {
     HAL_Init();
@@ -71,19 +174,22 @@ int app_main(void) {
     MX_ADC1_Init();
     MX_TIM4_Init();
     MX_USART1_UART_Init();
+    BootLogResetCause();
 
     /* Unconditional boot banner: proves the core is running and UART1 is
      * transmitting before any other peripheral or the RTOS starts. */
     {
         static const char boot_banner[] =
             "\r\n[BOOT] BCA182 Room Monitoring System starting...\r\n";
-        HAL_UART_Transmit(&huart1, (uint8_t *)boot_banner,
-                          sizeof(boot_banner) - 1, 100);
+        BootLog(boot_banner);
     }
 
     DHT22_Init(&dht22, GPIOA, GPIO_PIN_1);
+    BootLog("[BOOT] DHT22 initialized\r\n");
     LDR_Init(&ldr, &hadc1, ADC_CHANNEL_0);
+    BootLog("[BOOT] LDR initialized\r\n");
     PIR_Init(&pir, GPIOB, GPIO_PIN_0);
+    BootLog("[BOOT] PIR initialized\r\n");
     /*
      * Defer OLED probing until DisplayTask. A simulator or disconnected
      * panel must not prevent the scheduler and the remaining monitoring
@@ -91,23 +197,32 @@ int app_main(void) {
      */
     oled.hi2c = &hi2c1;
     oled.ready = 0;
+    BootLog("[BOOT] OLED deferred\r\n");
     Encoder_Init(&encoder, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_4);
+    BootLog("[BOOT] Encoder initialized\r\n");
     Buzzer_Init(&buzzer, &htim4, TIM_CHANNEL_3);
+    BootLog("[BOOT] Buzzer initialized\r\n");
 
     StateMachine_Init(&state_machine, INACTIVE_TIMEOUT_MS, 0);
     Alarm_Init(&alarm, &buzzer);
     UART_Mutex_Init(&uart_mutex, &huart1);
 
-    alarm_queue = xQueueCreate(5, sizeof(SensorData_t));
-    display_queue = xQueueCreate(5, sizeof(SensorData_t));
-    display_page_queue = xQueueCreate(1, sizeof(DisplayPage_t));
-    event_group = xEventGroupCreate();
+    BootLog("[BOOT] Creating RTOS objects\r\n");
+    alarm_queue = xQueueCreateStatic(5, sizeof(SensorData_t),
+                                      alarm_queue_buffer,
+                                      &alarm_queue_storage);
+    display_queue = xQueueCreateStatic(5, sizeof(SensorData_t),
+                                       display_queue_buffer,
+                                       &display_queue_storage);
+    display_page_queue = xQueueCreateStatic(1, sizeof(DisplayPage_t),
+                                            display_page_queue_buffer,
+                                            &display_page_queue_storage);
+    event_group = xEventGroupCreateStatic(&event_group_storage);
     if (alarm_queue == NULL || display_queue == NULL ||
         display_page_queue == NULL || event_group == NULL ||
         uart_mutex.mutex == NULL) {
         static const char rtos_error[] = "[FATAL] RTOS object allocation failed\r\n";
-        HAL_UART_Transmit(&huart1, (uint8_t *)rtos_error,
-                          sizeof(rtos_error) - 1, 100);
+        BootLog(rtos_error);
         Error_Handler();
     }
 
@@ -144,29 +259,83 @@ int app_main(void) {
     state_task_params.event_group = event_group;
     state_task_params.uart_mutex = &uart_mutex;
 
-    if (xTaskCreate(InputTask, "InputTask", 256, &input_task_params, 3,
-                    &input_task_params.task_handle) != pdPASS ||
-        xTaskCreate(MotionTask, "MotionTask", 256, &motion_task_params, 3,
-                    &motion_task_params.task_handle) != pdPASS ||
-        xTaskCreate(SensorTask, "SensorTask", 512, &sensor_task_params, 2,
-                    NULL) != pdPASS ||
-        xTaskCreate(AlarmTask, "AlarmTask", 256, &alarm_task_params, 2,
-                    NULL) != pdPASS ||
-        xTaskCreate(StateTask, "StateTask", 256, &state_task_params, 2,
-                    NULL) != pdPASS ||
-        xTaskCreate(DisplayTask, "DisplayTask", 512, &display_task_params, 1,
-                    NULL) != pdPASS) {
+    BaseType_t task_status = pdPASS;
+    BootLog("[BOOT] Creating InputTask\r\n");
+    input_task_params.task_handle =
+        xTaskCreateStatic(InputTask, "InputTask", 256, &input_task_params,
+                          3, input_task_stack, &input_task_storage);
+    task_status = (input_task_params.task_handle != NULL) ? pdPASS : pdFAIL;
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] InputTask ready\r\n");
+    }
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] Creating MotionTask\r\n");
+        motion_task_params.task_handle =
+            xTaskCreateStatic(MotionTask, "MotionTask", 256,
+                              &motion_task_params, 3, motion_task_stack,
+                              &motion_task_storage);
+        task_status = (motion_task_params.task_handle != NULL) ? pdPASS : pdFAIL;
+        if (task_status == pdPASS) {
+            BootLog("[BOOT] MotionTask ready\r\n");
+        }
+    }
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] Creating SensorTask\r\n");
+        TaskHandle_t sensor_handle =
+            xTaskCreateStatic(SensorTask, "SensorTask", 512,
+                              &sensor_task_params, 2, sensor_task_stack,
+                              &sensor_task_storage);
+        task_status = (sensor_handle != NULL) ? pdPASS : pdFAIL;
+        if (task_status == pdPASS) {
+            BootLog("[BOOT] SensorTask ready\r\n");
+        }
+    }
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] Creating AlarmTask\r\n");
+        TaskHandle_t alarm_handle =
+            xTaskCreateStatic(AlarmTask, "AlarmTask", 256,
+                              &alarm_task_params, 2, alarm_task_stack,
+                              &alarm_task_storage);
+        task_status = (alarm_handle != NULL) ? pdPASS : pdFAIL;
+        if (task_status == pdPASS) {
+            BootLog("[BOOT] AlarmTask ready\r\n");
+        }
+    }
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] Creating StateTask\r\n");
+        TaskHandle_t state_handle =
+            xTaskCreateStatic(StateTask, "StateTask", 256,
+                              &state_task_params, 2, state_task_stack,
+                              &state_task_storage);
+        task_status = (state_handle != NULL) ? pdPASS : pdFAIL;
+        if (task_status == pdPASS) {
+            BootLog("[BOOT] StateTask ready\r\n");
+        }
+    }
+    if (task_status == pdPASS) {
+        BootLog("[BOOT] Creating DisplayTask\r\n");
+        TaskHandle_t display_handle =
+            xTaskCreateStatic(DisplayTask, "DisplayTask", 384,
+                              &display_task_params, 1, display_task_stack,
+                              &display_task_storage);
+        task_status = (display_handle != NULL) ? pdPASS : pdFAIL;
+        if (task_status == pdPASS) {
+            BootLog("[BOOT] DisplayTask ready\r\n");
+        }
+    }
+    if (task_status != pdPASS) {
         static const char task_error[] = "[FATAL] Task allocation failed\r\n";
-        HAL_UART_Transmit(&huart1, (uint8_t *)task_error,
-                          sizeof(task_error) - 1, 100);
+        FatalUartWrite((const uint8_t *)task_error, sizeof(task_error) - 1U);
         Error_Handler();
     }
 
     UART_Mutex_Printf(&uart_mutex, "[MAIN] System initialized\r\n");
+    BootLogSchedulerVectors();
     UART_Mutex_Printf(&uart_mutex, "[MAIN] Starting FreeRTOS scheduler\r\n");
 
     vTaskStartScheduler();
 
+    BootLog("[FATAL] FreeRTOS scheduler returned\r\n");
     while (1) {
     }
 }
@@ -361,7 +530,15 @@ void SysTick_Handler(void) {
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     (void)xTask;
-    UART_Mutex_Printf(&uart_mutex, "[FATAL] Stack overflow in task: %s\r\n", pcTaskName);
+    char message[96];
+    int length = snprintf(message, sizeof(message),
+                          "[FATAL] Stack overflow in task: %s\r\n", pcTaskName);
+    if (length > 0) {
+        uint16_t size = (length < (int)sizeof(message))
+                            ? (uint16_t)length
+                            : (uint16_t)(sizeof(message) - 1U);
+        FatalUartWrite((const uint8_t *)message, size);
+    }
     __disable_irq();
     while (1) {
         HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -370,7 +547,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
 }
 
 void vApplicationMallocFailedHook(void) {
-    UART_Mutex_Printf(&uart_mutex, "[FATAL] Malloc failed - heap exhausted\r\n");
+    static const char fault[] = "[FATAL] Malloc failed - heap exhausted\r\n";
+    FatalUartWrite((const uint8_t *)fault, sizeof(fault) - 1U);
     __disable_irq();
     while (1) {
         HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -378,7 +556,30 @@ void vApplicationMallocFailedHook(void) {
     }
 }
 
+void vApplicationAssertHook(const char *file, unsigned long line) {
+    char message[128];
+    int length = snprintf(message, sizeof(message),
+                          "[FATAL] FreeRTOS assert: %s:%lu\r\n", file, line);
+    if (length > 0) {
+        uint16_t size = (length < (int)sizeof(message))
+                            ? (uint16_t)length
+                            : (uint16_t)(sizeof(message) - 1U);
+        FatalUartWrite((const uint8_t *)message, size);
+    }
+    __disable_irq();
+    while (1) {
+    }
+}
+
 void Error_Handler(void) {
+    __disable_irq();
+    while (1) {
+    }
+}
+
+void HardFault_Handler(void) {
+    static const char fault[] = "[FAULT] HardFault\r\n";
+    FatalUartWrite((const uint8_t *)fault, sizeof(fault) - 1U);
     __disable_irq();
     while (1) {
     }

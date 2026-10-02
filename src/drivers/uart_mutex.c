@@ -5,7 +5,18 @@
 
 void UART_Mutex_Init(UART_Mutex_t *uart_mutex, UART_HandleTypeDef *huart) {
     uart_mutex->huart = huart;
-    uart_mutex->mutex = xSemaphoreCreateMutex();
+    uart_mutex->mutex = xSemaphoreCreateMutexStatic(&uart_mutex->mutex_storage);
+}
+
+void UART_Mutex_RawSend(UART_Mutex_t *uart_mutex, const uint8_t *data, uint16_t size) {
+    USART_TypeDef *instance = uart_mutex->huart->Instance;
+
+    for (uint16_t i = 0; i < size; i++) {
+        uint32_t guard = 100000U;
+        while (((instance->SR & USART_SR_TXE) == 0U) && (guard-- > 0U)) {
+        }
+        instance->DR = data[i];
+    }
 }
 
 void UART_Mutex_Printf(UART_Mutex_t *uart_mutex, const char *format, ...) {

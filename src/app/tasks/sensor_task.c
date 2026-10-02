@@ -16,7 +16,11 @@ void SensorTask(void *pvParameters) {
     SensorTaskParams_t *params = (SensorTaskParams_t *)pvParameters;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xPeriod = pdMS_TO_TICKS(SENSOR_READ_PERIOD_MS);
+    static const char started[] = "[SENSOR] Task entered\r\n";
+    UART_Mutex_RawSend(params->uart_mutex, (const uint8_t *)started,
+                       sizeof(started) - 1U);
     UART_Mutex_Printf(params->uart_mutex, "[SENSOR] Task started\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
 
     for (;;) {
         SensorData_t data;
