@@ -244,6 +244,29 @@ The project is fully simulated in Wokwi with working peripherals, including USAR
 ### Option 2: Physical Hardware Validation
 The same firmware binary (`.pio/build/bluepill_f103c8/firmware.bin`) can be flashed to an STM32F103C8T6 Blue Pill board via ST-Link V2 using `pio run -e bluepill_f103c8 -t upload`.
 
+#### ST-Link V2 → Blue Pill Wiring
+
+The Blue Pill exposes SWD on the 4-pin header at the end opposite the USB connector, silkscreened `3V3 / SWDIO / SWCLK / GND` (or `VCC / DIO / CLK / GND`). A bare ST-Link V2 clone labels its 10-pin housing `3.3V / SWDIO / SWCLK / GND` on one side.
+
+| ST-Link V2 | Blue Pill SWD header | Notes |
+|------------|----------------------|-------|
+| `3.3V` | `3V3` | Target must be powered — do **not** fit the BOOT0 jumper alone and expect the debugger to power the board through SWD. |
+| `GND` | `GND` | Always connect the common ground first. |
+| `SWDIO` | `SWDIO` (PA13) | Bidirectional data. |
+| `SWCLK` | `SWCLK` (PA14) | Clock. |
+| `RST` | `RST` | Optional but recommended; enables connect-under-reset when a running image holds the bus. |
+
+> **Warning:** The ST-Link `5V` pin and the Blue Pill `5V` pin are **not** part of the SWD harness. `platformio.ini` sets `upload_protocol = stlink` and `upload_port = swd`, so the debugger attaches over the SWD pins only. Never bridge the 3.3 V rail to the 5 V rail.
+
+Neither PA13 (SWDIO) nor PA14 (SWCLK) is used by the application, and the firmware contains no SWJ-disable or AFIO remap calls, so the debug port stays available after reset. The only pin driven outside the peripheral set is PC13 (onboard LED).
+
+Switching between the simulator and real hardware requires no source changes:
+
+1. Wire the ST-Link as above and plug it into USB.
+2. Move the BOOT0 jumper to `0` (the normal run position) so the board boots the flashed image.
+3. Run `pio run -e bluepill_f103c8 -t upload`.
+4. Open the serial monitor with `pio device monitor -b 115200` to read the USART1 output on PA9/PA10.
+
 ---
 
 ## Unit Testing

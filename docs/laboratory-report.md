@@ -82,8 +82,11 @@ The system uses the following physical components connected to the STM32 Blue Pi
 | Buzzer | PWM (TIM4_CH3) | PB8 | Timer-based PWM |
 | USART1 (debug serial) | UART | PA9 (TX), PA10 (RX) | 115200 baud |
 | Onboard LED | GPIO | PC13 | Active-low |
+| ST-Link V2 (programming) | SWD | PA13 (SWDIO), PA14 (SWCLK), NRST (optional) | 3.3V + GND reference; not used at runtime |
 
 All peripherals except PIR operate at 3.3V. PIR supply uses the 5V rail. The I2C bus requires open-drain configuration with pull-ups (4.7 kΩ to 3.3V on PB6 and PB7).
+
+The ST-Link V2 connects to the 4-pin SWD header (`3V3 / SWDIO / SWCLK / GND`) at the end of the board opposite the USB connector, with the optional `RST` line wired to `NRST`. Only `3.3V` and `GND` are used for reference; the ST-Link `5V` pin is left unconnected. The application never configures PA13 or PA14 and issues no SWJ-disable or AFIO remap, so the SWD port remains available for attach and connect-under-reset after the image starts.
 
 ### 2.2 Software Architecture
 
