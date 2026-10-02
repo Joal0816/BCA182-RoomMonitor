@@ -1,0 +1,62 @@
+name: Hermes PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  hermes-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Hermes Agent
+        run: |
+          python -m pip install --upgrade pip
+          pip install hermes-agent
+
+      - name: Configure Hermes for OpenCode Go
+        run: |
+          mkdir -p ~/.hermes
+          cat << 'EOF' > ~/.hermes/config.yaml
+          model:
+            provider: custom
+            base_url: https://opencode.ai/zen/go/v1
+            default: deepseek-v4-flash
+            api_key: ${{ secrets.OPENCODE_API_KEY }}
+          api_key: ${{ secrets.OPENCODE_API_KEY }}
+          endpoint: https://opencode.ai/zen/go/v1
+          EOF
+
+      - name: Run Hermes PR Review & Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          # Extract PR diff against base branch
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.patch
+          
+          if [ ! -s pr_diff.patch ]; then
+            echo "Empty diff, skipping review."
+            exit 0
+          fi
+
+          # Review diff with Hermes
+          hermes -z "You are an automated PR code reviewer. Analyze this git patch for logic bugs, concurrency/race conditions, silent failure paths, and embedded/FreeRTOS safety. Provide clear, concise, actionable feedback with specific line references: $(cat pr_diff.patch)" > review_output.md || true
+
+          # If review output exists, post comment to PR
+          if [ -s review_output.md ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file review_output.md
+          fi
